@@ -1,8 +1,12 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
 from module.core import *
 
 
 class HandleFiles:
-    def __init__(self, datapath, batchlog):
+    def __init__(self, datapath, counter):
         super(HandleFiles, self).__init__()
 
         self.datapath = datapath
@@ -10,11 +14,10 @@ class HandleFiles:
         self.file_end_index = None
         self.data_head = None
         self.alldatafiles = {}
-        self.logfile = None
-        self.batchlog = batchlog
+        self.counter = counter
+        self.run_names = []
 
     def open_datafiles(self):
-        self.alldatafiles = {}
         for n, data_path in enumerate(self.datapath):
             run_name = os.path.basename(data_path)
             name_without_extention = os.path.splitext(run_name)[0]
@@ -39,11 +42,15 @@ class HandleFiles:
                                     pass
                 filedata = pd.read_csv(data_path, header=self.file_start_index)
                 filedata.columns = self.data_head
-                filedata = filedata.iloc[:self.file_end_index,:]
+                filedata = filedata.iloc[:self.file_end_index]
                 filedata = filedata.astype(float)
                 filedata.replace(0, 1, inplace=True)
 
-            self.alldatafiles[name_without_extention] = filedata
+                # self.slice_data(filedata)
+
+            unique_name = name_without_extention + "_" + str(self.counter)
+            self.alldatafiles[unique_name] = filedata
+            self.run_names.append(unique_name)
 
     def head_masses(self, masses):
         head = []
@@ -62,4 +69,36 @@ class HandleFiles:
                 head.append(mass)
 
         return head
+
+    def handle_log(self, log):
+        sequence = [x for x in log[' Sequence Number'].to_list() if not pd.isna(x)]
+        names = [x for x in log[' Comment'].to_list() if not pd.isna(x)]
+
+        return dict(zip(names, sequence))
+
+    def slice_data(self, data):
+        time = data.iloc[:, 0]
+        smoothing_window = 10
+        prominence = 5
+        distance = 50
+
+        for col in data.columns[1:]:
+            values = data[col].dropna().values
+            indices = np.arange(len(values))
+
+            smoothed_values = pd.Series(values).rolling(smoothing_window, center=True).mean()
+
+            peaks, _ = find_peaks(smoothed_values, prominence=prominence, distance=distance)
+            troughs, _ = find_peaks(-smoothed_values, prominence=prominence, distance=distance)
+
+            boundaries = sorted(set(np.concatenate((peaks, troughs, [0, len(values)-1]))))
+
+            for i in range(len(boundaries) - 1):
+                start, end = boundaries[i], boundaries[i+1]
+                segment = data.iloc[start:end + 1]
+
+            plt.plot(time, values, alpha=0.7)
+            plt.scatter(time.iloc[peaks], values[peaks], color='red', marker='o', label=f'{col} Peaks')
+            plt.scatter(time.iloc[troughs], values[troughs], color='blue', marker='x', label=f'{col} Troughs')
+            plt.show()
 
