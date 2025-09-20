@@ -10,7 +10,7 @@ class DRS:
         super(DRS, self).__init__()
 
         self.line_index = None
-
+        self.limits = {}
         self.signal_data = {}  # signal sweeps of all files imported
         self.background_data = {}  # background sweeps of all files imported
         self.signal_mean = {}  # signal mean of all files imported
@@ -25,10 +25,8 @@ class DRS:
         self.background_data = {}
         self.signal_mean = {}
         self.background_mean = {}
-
         for name, data in dict_initial.items():
             isotope_standard_mean = data[mass_index].mean()
-
             index_counter = 0
             for value in data[mass_index]:
                 if value > isotope_standard_mean:
@@ -36,7 +34,6 @@ class DRS:
                     break
                 else:
                     index_counter += 1
-
             row_count = len(data.index)
             if self.line_index == 0 or self.line_index == row_count:
                 self.line_index = row_count // 2
@@ -44,16 +41,19 @@ class DRS:
             percent_subtracted_background = int(round((self.line_index * 0.1), 0))
             background_data = data.iloc[:self.line_index]
             self.background_data[name] = background_data
-            background_data_for_mean = data.iloc[
-                                       percent_subtracted_background:(self.line_index - percent_subtracted_background)]
+            min_bkg = percent_subtracted_background
+            max_bkg = self.line_index - percent_subtracted_background
+            background_data_for_mean = data.iloc[min_bkg:max_bkg]
             self.background_mean[name] = background_data_for_mean.mean()
 
             percent_subtracted_signal = int(round(((row_count - self.line_index) * 0.1), 0))
-            run_data_for_mean = data.iloc[
-                                (self.line_index + percent_subtracted_signal):(row_count - percent_subtracted_signal)]
+            min_sig = self.line_index + percent_subtracted_signal
+            max_sig = row_count - percent_subtracted_signal
+            run_data_for_mean = data.iloc[min_sig:max_sig]
             self.signal_mean[name] = run_data_for_mean.mean()
             run_data = data.iloc[self.line_index:]
             self.signal_data[name] = run_data
+            self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]
 
     def background_subtraction(self):
         self.intermediate_data = {}

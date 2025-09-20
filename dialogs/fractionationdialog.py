@@ -1,5 +1,4 @@
 from module.core import *
-from module.drs import DRS
 from ui.FractionationDialog import Ui_Fractionation
 
 
@@ -85,6 +84,8 @@ class FractionationDialog(QDialog):
         method = self.ui.comboBox_method.currentText()
 
         self.ui.graphicsView.clear()
+        legend = self.ui.graphicsView.addLegend(offset=(-1, 1), labelTextColor='k')
+
         for i, name in enumerate(group_selections):
             selection_data = self.DRS.intermediate_data[name]
             x = selection_data.iloc[:, 0].to_numpy()
@@ -96,8 +97,6 @@ class FractionationDialog(QDialog):
         y_interp = calc_y_interp(x_mean, method)
         self.ui.graphicsView.plot(x_mean, y_mean, pen=pg.mkPen(color='black', width=1), name=group + '_mean')
         self.ui.graphicsView.plot(x_mean, y_interp, pen=pg.mkPen(color='red', width=1), name=group + '_DF')
-
-        legend = self.ui.graphicsView.addLegend(offset=(-1, 1), labelTextColor='k')
 
     def plot_data_corrected(self):
         group = self.ui.comboBox_group.currentText()

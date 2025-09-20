@@ -15,6 +15,7 @@ from dialogs.materialsdialog import MaterialsDialog
 from widgets.overlaywidget import LoadingOverlay
 from dialogs.fractionationdialog import FractionationDialog
 from dialogs.driftdialog import DriftDialog
+from dialogs.signaldialog import SignalDialog
 
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
@@ -56,6 +57,7 @@ class MainWindow(QMainWindow):
         self.gases = {'SF6': ['Rb85', 'Sr105', 'Sr106', 'Sr107'],
                       'O2': ['Rb85', 'Sr102', 'Sr103', 'Sr104'],
                       'N2O': ['Rb85', 'Sr102', 'Sr103', 'Sr104']}
+        self.signal = False
 
         self.handlefiles = HandleFiles(self.datafilespath, self.globalcounter)
         self.DRS = DRS()
@@ -66,17 +68,18 @@ class MainWindow(QMainWindow):
         self.ui.btn_log.clicked.connect(self.load_log)
         self.ui.btn_new.clicked.connect(self.restart_app)
         self.ui.btn_addfile.clicked.connect(self.load_file)
+        self.ui.btn_export.clicked.connect(self.export_data)
+        self.ui.btn_signal.clicked.connect(self.open_signalDialog)
+        self.ui.btn_RM.clicked.connect(self.open_materialsDialog)
 
         self.ui.listWidget_names.viewport().installEventFilter(self)
         self.ui.listWidget_masses.viewport().installEventFilter(self)
-        self.ui.btn_export.clicked.connect(self.export_data)
         self.ui.checkBox_rawRatios.clicked.connect(self.data_mode)
         self.ui.checkBox_dfIndex.clicked.connect(self.data_mode)
         self.ui.checkBox_convertionRate.clicked.connect(self.data_mode)
         self.ui.runSelectionMode.clicked.connect(self.lists_selection_mode)
         self.ui.massSelectionMode.clicked.connect(self.lists_selection_mode)
         self.ui.btn_groups.clicked.connect(self.open_groupDialog)
-        self.ui.btn_RM.clicked.connect(self.open_materialsDialog)
         self.ui.btn_run.clicked.connect(self.reduction_scheme)
         self.ui.checkBox_matrix.toggled.connect(self.check_drift_option)
 
@@ -233,6 +236,20 @@ class MainWindow(QMainWindow):
             self.ui.checkBox_drift.setCheckState(Qt.Unchecked)
             self.DRS.remove_correction('drift', self.groups)
             return
+
+    def open_signalDialog(self):
+        self.overlay.show()
+        self.signalDialog = SignalDialog(self, self.handlefiles.alldatafiles, self.DRS.line_index,
+                                         self.run_names_log, self.handlefiles.data_head, self.DRS.limits)
+        self.signalDialog.signal_return.connect(self.return_signalDialog)
+        self.signalDialog.setWindowModality(Qt.WindowModal)
+        self.signalDialog.exec_()
+
+    @pyqtSlot(bool, dict)
+    def return_signalDialog(self, opt, new_limits):
+        self.overlay.hide()
+        self.DRS.limits = new_limits
+        self.signal = opt
 
     def restart_app(self):
         self.close()
@@ -666,47 +683,50 @@ class MainWindow(QMainWindow):
 
         if sender == "btn_run":
             if len(self.groups.keys()) > 0:
-                if fractionation:
-                    self.open_fractionationDialog(fractionation_method)
-                    fractionation = self.ui.checkBox_fractionation.isChecked()
-                    if not fractionation:
-                        return
-                if massBias:
-                    self.DRS.mass_bias_correction(self.groups)
-
-                if drift:
-                    if rm1_name in self.groups.keys() and rm1_name in self.database.keys():
-                        self.open_driftDialog(drift_method, rm1_name)
-                        drift = self.ui.checkBox_drift.isChecked()
-                        if not drift:
+                if self.signal:
+                    if fractionation:
+                        self.open_fractionationDialog(fractionation_method)
+                        fractionation = self.ui.checkBox_fractionation.isChecked()
+                        if not fractionation:
                             return
-                    else:
-                        QTimer.singleShot(0, lambda: self.ui.labelStatus.setText(
-                            'ERROR! RM for drift correction should be in the database and in groups'))
-                        QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
+                    if massBias:
+                        self.DRS.mass_bias_correction(self.groups)
 
-                if matrix:
-                    if rm2_name in self.groups.keys() and rm2_name in self.database.keys():
-                        if drift:
-                            self.DRS.matrix_correction(self.groups, rm2_name, self.database)
+                    if drift:
+                        if rm1_name in self.groups.keys() and rm1_name in self.database.keys():
+                            self.open_driftDialog(drift_method, rm1_name)
+                            drift = self.ui.checkBox_drift.isChecked()
+                            if not drift:
+                                return
                         else:
                             QTimer.singleShot(0, lambda: self.ui.labelStatus.setText(
-                                'ERROR! no external correction has been performed'))
+                                'ERROR! RM for drift correction should be in the database and in groups'))
                             QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
-                else:
-                    QTimer.singleShot(0, lambda: self.ui.labelStatus.setText(
-                        'ERROR! RM for matrix correction should be in the database and in groups'))
+
+                    if matrix:
+                        if rm2_name in self.groups.keys() and rm2_name in self.database.keys():
+                            if drift:
+                                self.DRS.matrix_correction(self.groups, rm2_name, self.database)
+                            else:
+                                QTimer.singleShot(0, lambda: self.ui.labelStatus.setText(
+                                    'ERROR! no external correction has been performed'))
+                                QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
+                    else:
+                        QTimer.singleShot(0, lambda: self.ui.labelStatus.setText(
+                            'ERROR! RM for matrix correction should be in the database and in groups'))
+                        QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
+
+                    self.DRS.compute_results(self.groups)
+                    QTimer.singleShot(0, lambda: self.ui.labelStatus.setText('All selected data corrected!'))
                     QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
-
-                self.DRS.compute_results(self.groups)
-                QTimer.singleShot(0, lambda: self.ui.labelStatus.setText('All selected data corrected!'))
-                QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
-
+                else:
+                    # message here
+                    pass
             else:
                 QTimer.singleShot(0, lambda: self.ui.labelStatus.setText('ERROR! You should create group selections'))
                 QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
         else:
-            self.DRS.background(self.handlefiles.alldatafiles, Sr_88)
+            self.DRS.background(self.handlefiles.alldatafiles, Rb_85)
             self.DRS.background_subtraction()
             self.DRS.Rb_calculation()
             self.DRS.raw_ratios(Sr_86, Sr_87, Sr_88)
