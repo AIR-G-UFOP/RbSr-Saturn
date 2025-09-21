@@ -1,3 +1,5 @@
+import os.path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -6,21 +8,37 @@ from module.core import *
 
 
 class HandleFiles:
-    def __init__(self, datapath, counter):
+    def __init__(self):
         super(HandleFiles, self).__init__()
 
-        self.datapath = datapath
+        self.datapath = []
         self.file_start_index = None
         self.file_end_index = None
         self.data_head = None
         self.alldatafiles = {}
-        self.counter = counter
+        self.counter = 0
         self.run_names = []
+        self.all_run_names = []
+        self.name_links = {}
 
-    def open_datafiles(self):
+    def open_folders(self, dirct):
+        self.datapath = []
+        folders = next(os.walk(dirct))[1]
+        for folder in folders:
+            folderpath = os.path.join(dirct, folder)
+            files = next(os.walk(folderpath))[2]
+            for file in files:
+                file_name, file_extension = os.path.splitext(file)
+                if file_extension == '.csv':
+                    file_path = os.path.join(folderpath, file)
+                    self.datapath.append(file_path)
+
+    def open_data_files(self):
+        self.run_names = []
+        self.sort_path()
         for n, data_path in enumerate(self.datapath):
             run_name = os.path.basename(data_path)
-            name_without_extention = os.path.splitext(run_name)[0]
+            name_without_extension = os.path.splitext(run_name)[0]
 
             raw_file = []
             with open(data_path) as data:
@@ -48,9 +66,17 @@ class HandleFiles:
 
                 # self.slice_data(filedata)
 
-            unique_name = name_without_extention + "_" + str(self.counter)
+            unique_name = name_without_extension + " #" + str(self.counter)
             self.alldatafiles[unique_name] = filedata
+            self.all_run_names.append(unique_name)
             self.run_names.append(unique_name)
+
+    def open_single_file(self, filepath):
+        self.datapath = []
+        for path in filepath:
+            extention = os.path.splitext(os.path.basename(path))[1]
+            if extention == '.csv':
+                self.datapath.append(path)
 
     def head_masses(self, masses):
         head = []
@@ -69,12 +95,6 @@ class HandleFiles:
                 head.append(mass)
 
         return head
-
-    def handle_log(self, log):
-        sequence = [x for x in log[' Sequence Number'].to_list() if not pd.isna(x)]
-        names = [x for x in log[' Comment'].to_list() if not pd.isna(x)]
-
-        return dict(zip(names, sequence))
 
     def slice_data(self, data):
         time = data.iloc[:, 0]
@@ -101,4 +121,10 @@ class HandleFiles:
             plt.scatter(time.iloc[peaks], values[peaks], color='red', marker='o', label=f'{col} Peaks')
             plt.scatter(time.iloc[troughs], values[troughs], color='blue', marker='x', label=f'{col} Troughs')
             plt.show()
+
+    def sort_path(self):
+        self.datapath = sorted(self.datapath, key=lambda x: int(os.path.basename(x).split('.')[0]))
+
+
+
 

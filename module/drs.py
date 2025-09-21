@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 
 from module.core import *
+from module.utils import get_unique_name, remap_dataframe
 
 
 class DRS:
@@ -109,7 +110,7 @@ class DRS:
 
         self.DF_data = pd.DataFrame.from_dict(DF, orient='index').sort_index()
 
-    def mass_bias_correction(self, groups):
+    def mass_bias_correction(self, groups, link):
         for group, names in groups.items():
             for run in names:
                 data = self.intermediate_data[run]
@@ -135,7 +136,7 @@ class DRS:
                 data['Rb87/Sr86_mb'] = Rb87_Sr86_mb
                 self.intermediate_data[run] = data
 
-    def __compile_fractionation(self, names):
+    def _compile_fractionation(self, names):
         group_data = [self.intermediate_data[name]['Rb87/Sr86_raw'].to_numpy() for name in names]
         group_time = [self.intermediate_data[name]['Time [Sec]'].to_numpy() for name in names]
         # Define common time grid
@@ -161,7 +162,7 @@ class DRS:
 
     def downhole_fractionation(self, selections, method, s):
         cov = None
-        Ft, Fr = self.__compile_fractionation(selections)
+        Ft, Fr = self._compile_fractionation(selections)
 
         if method == 'Exponential':
             p0 = [1, -0.01, 100]
@@ -194,7 +195,7 @@ class DRS:
             data['Rb87/Sr86_DFcorr'] = (data[col] / fcorr) * np.nanmean(fcorr)
             self.intermediate_data[name] = data
 
-    def remove_correction(self, correction, groups):
+    def remove_correction(self, correction, groups, link):
         for group, names in groups.items():
             for name in names:
                 try:
@@ -205,7 +206,7 @@ class DRS:
                 except KeyError:
                     pass
 
-    def average_factor(self, groups, rm_name, database, all_names):
+    def average_factor(self, groups, rm_name, database, all_names, link):
         rm_positions = groups[rm_name]
         rm_database = database[rm_name]
         rm_true_RbSr = rm_database['Rb87/Sr86']
@@ -220,7 +221,7 @@ class DRS:
         ySr_std = []
         for name in rm_positions:
             rm_data = self.intermediate_data[name]
-            x.append(all_names[name])
+            x.append(all_names.index(name))
             if 'Rb87/Sr86_mb' in rm_data.columns:
                 yRb_i = rm_data['Rb87/Sr86_mb'].mean()
                 yRb_std_i = rm_data['Rb87/Sr86_mb'].std()
@@ -250,9 +251,8 @@ class DRS:
                 {'Rb87/Sr86': np.array(yRb), 'Sr87/Sr86': np.array(ySr)},
                 {'Rb87/Sr86': np.array(yRb_std), 'Sr87/Sr86': np.array(ySr_std)})
 
-    def polynomial_factor(self, groups, rm_name, database, all_positions, degree):
+    def polynomial_factor(self, groups, rm_name, all_positions, degree, link):
         models = {}
-        true_values = database[rm_name]
         selections = groups[rm_name]
 
         if 'Rb87/Sr86_mb' in self.intermediate_data[selections[0]].columns:
@@ -271,7 +271,7 @@ class DRS:
             y_r = []
             y_std_r = []
             for name in selections:
-                x.append(all_positions[name])
+                x.append(all_positions.index(name))
                 data = self.intermediate_data[name]
                 ratio_i = data[ratio].mean()
                 ratio_std_i = data[ratio].std()
@@ -284,7 +284,7 @@ class DRS:
 
         return models, np.array(x), y, y_std
 
-    def spline_factor(self, groups, rm_name, all_positions, s):
+    def spline_factor(self, groups, rm_name, all_positions, s, link):
         splines = {}
         selections = groups[rm_name]
 
@@ -304,7 +304,7 @@ class DRS:
             y_r = []
             y_std_r = []
             for name in selections:
-                x.append(all_positions[name])
+                x.append(all_positions.index(name))
                 data = self.intermediate_data[name]
                 ratio_i = data[ratio].mean()
                 ratio_std_i = data[ratio].std()
@@ -317,7 +317,7 @@ class DRS:
 
         return splines, np.array(x), y, y_std
 
-    def drift_correction(self, mtd, groups, factors, dg, true_values, all_positions):
+    def drift_correction(self, mtd, groups, factors, dg, true_values, all_positions, link):
         if mtd == 'Average':
             fc_RbSr = factors['Rb87/Sr86']
             fc_SrSr = factors['Sr87/Sr86']
@@ -341,7 +341,7 @@ class DRS:
             for group, names in groups.items():
                 for name in names:
                     data = self.intermediate_data[name]
-                    x = all_positions[name]
+                    x = all_positions.index(name)
 
                     if 'Rb87/Sr86_mb' in data.columns:
                         ratios = ['Rb87/Sr86_mb', 'Sr87/Sr86_mb']
@@ -390,7 +390,7 @@ class DRS:
 
                 self.intermediate_data[name] = data
 
-    def compute_results(self, groups):
+    def compute_results(self, groups, link):
         mean = {}
         se = {}
         std = {}
@@ -432,5 +432,5 @@ class DRS:
         r_rho = pd.DataFrame(data=rho, index=['Rho']).T
 
         results = pd.concat([r_mean, r_se, r_std, r_rho], axis=1)
-
         self.results = results[['Rb87/Sr86', 'Rb87/Sr86 2SE', 'Rb87/Sr86 2SD', 'Sr87/Sr86', 'Sr87/Sr86 2SE', 'Sr87/Sr86 2SD', 'Rho']]
+        self.results = remap_dataframe(self.results, link)

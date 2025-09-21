@@ -8,6 +8,8 @@ import pandas as pd
 from widgets import *
 from module.core import *
 from module.handlefile import HandleFiles
+from module.handlelog import HandleLog
+from module.utils import *
 from module.drs import DRS
 from ui.RbSrMainWindow import Ui_MainWindow
 from dialogs.groupdialog import GroupDialog
@@ -39,9 +41,7 @@ class MainWindow(QMainWindow):
         self.subTable = None
         self.subPlot = None
         self.subLists = None
-        self.datafilespath = None   # path of all folders from imported folder
         self.logfile = None     # laser log file
-        self.batchlog = {}
         self.plotted = {}
         self.penDic = {}
         self.runselected = []
@@ -51,15 +51,13 @@ class MainWindow(QMainWindow):
         self.globalcounter = 0  # to account for the number os data folder/file opened
         self.database = {}
         self.groups = {}
-        self.run_names = []
-        self.run_names_log = {}
-        self.names_link = {}
         self.gases = {'SF6': ['Rb85', 'Sr105', 'Sr106', 'Sr107'],
                       'O2': ['Rb85', 'Sr102', 'Sr103', 'Sr104'],
                       'N2O': ['Rb85', 'Sr102', 'Sr103', 'Sr104']}
         self.signal = False
 
-        self.handlefiles = HandleFiles(self.datafilespath, self.globalcounter)
+        self.handlefiles = HandleFiles()
+        self.handlelog = HandleLog()
         self.DRS = DRS()
         self.overlay = LoadingOverlay(self.ui.bgApp)
         self.overlay.hide()
@@ -74,13 +72,10 @@ class MainWindow(QMainWindow):
 
         self.ui.listWidget_names.viewport().installEventFilter(self)
         self.ui.listWidget_masses.viewport().installEventFilter(self)
-        self.ui.checkBox_rawRatios.clicked.connect(self.data_mode)
-        self.ui.checkBox_dfIndex.clicked.connect(self.data_mode)
-        self.ui.checkBox_convertionRate.clicked.connect(self.data_mode)
         self.ui.runSelectionMode.clicked.connect(self.lists_selection_mode)
         self.ui.massSelectionMode.clicked.connect(self.lists_selection_mode)
         self.ui.btn_groups.clicked.connect(self.open_groupDialog)
-        self.ui.btn_run.clicked.connect(self.reduction_scheme)
+        self.ui.btn_run.clicked.connect(self.check_reduction_scheme)
         self.ui.checkBox_matrix.toggled.connect(self.check_drift_option)
 
         self.setupSubWindows()
@@ -178,14 +173,13 @@ class MainWindow(QMainWindow):
     def check_drift_option(self):
         if self.ui.checkBox_matrix.isChecked():
             if not self.ui.checkBox_drift.isChecked():
-                QTimer.singleShot(0, lambda: self.ui.labelStatus.setText(
-                    'Matrix-effect correction can only be applied if drift correction is applied too'))
-                QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
+                self.print_message('Matrix-effect correction can only be applied if drift correction is applied too')
                 self.ui.checkBox_drift.setCheckState(Qt.Checked)
 
     def open_groupDialog(self):
         self.overlay.show()
-        self.groupDialog = GroupDialog(self, self.run_names, self.database, self.run_names_log)
+        self.groupDialog = GroupDialog(self, self.handlefiles.run_names, self.database, self.handlelog.name_links,
+                                       self.handlelog.names_log)
         self.groupDialog.setWindowModality(Qt.WindowModal)
         self.groupDialog.group_return.connect(self.return_groupDialog)
         self.groupDialog.show()
@@ -209,7 +203,7 @@ class MainWindow(QMainWindow):
 
     def open_fractionationDialog(self, method):
         self.overlay.show()
-        self.fractionationDialog = FractionationDialog(self, self.groups, self.DRS, method)
+        self.fractionationDialog = FractionationDialog(self, self.groups, self.DRS, method, self.handlelog)
         self.fractionationDialog.setWindowModality(Qt.WindowModal)
         self.fractionationDialog.fractionation_return.connect(self.return_fractionationDialog)
         self.fractionationDialog.exec_()
@@ -219,12 +213,13 @@ class MainWindow(QMainWindow):
         self.overlay.hide()
         if not opt:
             self.ui.checkBox_fractionation.setCheckState(Qt.Unchecked)
-            self.DRS.remove_correction('downhole', self.groups)
+            self.DRS.remove_correction('downhole', self.groups, self.handlelog.name_links)
             return
 
     def open_driftDialog(self, method, rm):
         self.overlay.show()
-        self.driftDialog = DriftDialog(self, self.DRS, self.database, self.groups, method, rm, self.run_names_log)
+        self.driftDialog = DriftDialog(self, self.DRS, self.database, self.groups, method, rm,
+                                       self.handlefiles.run_names, self.handlelog.name_links)
         self.driftDialog.setWindowModality(Qt.WindowModal)
         self.driftDialog.drift_return.connect(self.return_driftDialog)
         self.driftDialog.exec_()
@@ -234,13 +229,14 @@ class MainWindow(QMainWindow):
         self.overlay.hide()
         if not opt:
             self.ui.checkBox_drift.setCheckState(Qt.Unchecked)
-            self.DRS.remove_correction('drift', self.groups)
+            self.DRS.remove_correction('drift', self.groups, self.handlelog.name_links)
             return
 
     def open_signalDialog(self):
         self.overlay.show()
         self.signalDialog = SignalDialog(self, self.handlefiles.alldatafiles, self.DRS.line_index,
-                                         self.run_names_log, self.handlefiles.data_head, self.DRS.limits)
+                                         self.handlefiles.all_run_names, self.handlefiles.data_head, self.DRS.limits,
+                                         self.handlelog.name_links, self.handlelog.names_log)
         self.signalDialog.signal_return.connect(self.return_signalDialog)
         self.signalDialog.setWindowModality(Qt.WindowModal)
         self.signalDialog.exec_()
@@ -250,6 +246,11 @@ class MainWindow(QMainWindow):
         self.overlay.hide()
         self.DRS.limits = new_limits
         self.signal = opt
+        if opt:
+            if self.create_popup('Run Scheme?',
+                                 'You have changed baseline/signal intervals.'
+                                 '\nDo you want to run the reduction scheme?'):
+                self.check_reduction_scheme()
 
     def restart_app(self):
         self.close()
@@ -267,108 +268,56 @@ class MainWindow(QMainWindow):
 
     def load_folder(self):
         directory = tk.filedialog.askdirectory(title='Load Data Folder')
-
         if directory != '':
-            self.datafilespath = []
-            folders = next(os.walk(directory))[1]
-            for folder in folders:
-                folderpath = os.path.join(directory, folder)
-                files = next(os.walk(folderpath))[2]
-                for file in files:
-                    file_name, file_extension = os.path.splitext(file)
-                    if file_extension == '.csv':
-                        file_path = os.path.join(folderpath, file)
-                        self.datafilespath.append(file_path)
-
-            if len(self.datafilespath) > 0:
+            self.handlefiles.open_folders(directory)
+            if len(self.handlefiles.datapath) > 0:
                 self.globalcounter += 1
-
-                if 'BatchLog.csv' in next(os.walk(directory))[2]:
-                    batchlog = pd.read_csv(os.path.join(directory, 'BatchLog.csv'))
-                    self.batchlog[self.globalcounter] = batchlog
-
                 self.handle_files()
             else:
-                QTimer.singleShot(0, lambda: self.ui.labelStatus.setText('ERROR! Could not import folder'))
-                QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
+                self.print_message('ERROR! Could not import folder')
 
     def load_file(self):
         filepath = tk.filedialog.askopenfilenames(title='Load Data File', filetypes=[("CSV", "*.csv")])
-
         if filepath != '':
-            self.datafilespath = []
-            for path in filepath:
-                extention = os.path.splitext(os.path.basename(path))[1]
-                if extention == '.csv':
-                    self.datafilespath.append(path)
-                else:
-                    QTimer.singleShot(0, lambda: self.ui.labelStatus.setText('ERROR! Could not import file'))
-                    QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
-
-            if len(self.datafilespath) > 0:
+            self.handlefiles.open_single_file(filepath)
+            if self.handlefiles.datapath:
                 self.handle_files()
             else:
-                QTimer.singleShot(0, lambda: self.ui.labelStatus.setText('ERROR! Could not import file'))
-                QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
+                self.print_message('ERROR! Could not import file')
 
     def handle_files(self):
-        self.handlefiles.datapath = self.datafilespath
         self.handlefiles.counter = self.globalcounter
-        self.handlefiles.open_datafiles()
-
+        self.handlefiles.open_data_files()
         self.populate_list_masses()
         self.populate_list_names()
-        self.reduction_scheme()
+        self.DRS.background(self.handlefiles.alldatafiles, self.gases[self.ui.comboBoxGas.currentText()][3])
 
     def load_log(self):
-        def _remap_dicts(data, link):
-            return {actual_key: data[past_key] for actual_key, past_key in link.items() if past_key in data}
-
         if len(self.handlefiles.alldatafiles.keys()) > 0:
-            file = tk.filedialog.askopenfilename(title='Load Log File', filetypes=[("CSV", "*.csv")])
-            if file != '':
-                extention = os.path.splitext(os.path.basename(file))[1]
-                if extention == '.csv':
-                    self.logfile = pd.read_csv(file, sep=",")
-                    self.run_names_log = self.handlefiles.handle_log(self.logfile)
-                    if len(self.run_names_log.keys()) > 0:
+            path = tk.filedialog.askopenfilename(title='Load Log File', filetypes=[("CSV", "*.csv")])
+            if path != '':
+                if self.handlelog.open_log_file(path):
+                    self.handlelog.get_names_from_log()
+                    if self.handlelog.names_log:
+                        self.handlelog.link_unique_name_with_log(self.handlefiles.run_names)
+                        new_names = get_log_name(self.handlelog.name_links, self.handlefiles.all_run_names,
+                                                 self.handlelog.names_log)
                         self.ui.listWidget_names.clear()
-                        self.ui.listWidget_names.addItems(list(self.run_names_log.keys()))
-
-                        selected = []
-                        previous_selected = []
-                        for name in self.run_names:
-                            name_split = name.split('_')
-                            position = int(name_split[0]) - 1
-                            item = self.ui.listWidget_names.item(position)
-                            text = item.text()
-
-                            self.names_link[text] = name
-
-                            if name in self.runselected:
-                                item.setSelected(True)
-                                selected.append(text)
-                            if name in self.previous_runselected:
-                                previous_selected.append(text)
-                        self.runselected = selected
-                        self.previous_runselected = previous_selected
-
-                        self.handlefiles.alldatafiles = _remap_dicts(self.handlefiles.alldatafiles, self.names_link)
-                        self.DRS.signal_data = _remap_dicts(self.DRS.signal_data, self.names_link)
-                        self.DRS.background_data = _remap_dicts(self.DRS.background_data, self.names_link)
-                        self.DRS.signal_mean = _remap_dicts(self.DRS.signal_mean, self.names_link)
-                        self.DRS.background_mean = _remap_dicts(self.DRS.background_mean, self.names_link)
-                        self.DRS.intermediate_data = _remap_dicts(self.DRS.intermediate_data, self.names_link)
-
-                        link = {v: k for k, v in self.names_link.items()}
-                        self.DRS.convertion_rate_data = self.DRS.convertion_rate_data.rename(index=link).sort_index()
-                        self.DRS.DF_data = self.DRS.DF_data.rename(index=link).sort_index()
+                        self.ui.listWidget_names.addItems(new_names)
+                        if self.runselected:
+                            self.runselected = get_log_name(self.handlelog.name_links, self.runselected,
+                                                            self.handlelog.names_log)
+                            self.previous_runselected = get_log_name(self.handlelog.name_links,
+                                                                     self.previous_runselected,
+                                                                     self.handlelog.names_log)
+                            for i in range(self.ui.listWidget_names.count()):
+                                item = self.ui.listWidget_names.item(i)
+                                if item.text() in self.runselected:
+                                    item.setSelected(True)
                 else:
-                    QTimer.singleShot(0, lambda: self.ui.labelStatus.setText('ERROR! Could not import log file'))
-                    QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
+                    self.print_message('ERROR! Could not import log file')
             else:
-                QTimer.singleShot(0, lambda: self.ui.labelStatus.setText('ERROR! Could not import log file'))
-                QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
+                self.print_message('ERROR! Could not import log file')
 
     def export_data(self):
         if isinstance(self.DRS.results, pd.DataFrame):
@@ -390,15 +339,12 @@ class MainWindow(QMainWindow):
         #         convertion.to_excel(writer, sheet_name='Convertion_rate', index=True)
 
     def populate_list_names(self):
-        self.ui.listWidget_names.blockSignals(True)
         current_names = []
         for i in range(self.ui.listWidget_names.count()):
             current_names.append(self.ui.listWidget_names.item(i).text())
-        for item in self.handlefiles.run_names:
+        for item in self.handlefiles.all_run_names:
             if item not in current_names:
                 self.ui.listWidget_names.addItem(item)
-        self.ui.listWidget_names.blockSignals(False)
-        self.run_names = [self.ui.listWidget_names.item(i).text() for i in range(self.ui.listWidget_names.count())]
 
     def populate_list_masses(self):
         masses = (self.handlefiles.data_head[1:] +
@@ -583,11 +529,6 @@ class MainWindow(QMainWindow):
 
         self.plot_data()
 
-    def data_mode(self):
-        self.populate_table()
-        if self.ui.checkBox_dfIndex.isChecked():
-            self.plot_data()
-
     def plot_data(self):
         def _colorgen(run, mass):
             color = "#" + ''.join([random.choice('ABCDE0123456789') for i in range(6)])
@@ -601,7 +542,10 @@ class MainWindow(QMainWindow):
                 self.penDic[run] = {mass: color}
 
         def _plt():
-            for run in self.runselected:
+            selected = get_unique_name(self.handlelog.name_links, self.runselected)
+            previousselected = get_unique_name(self.handlelog.name_links, self.previous_runselected)
+            legend = self.ui.graphicsView.addLegend(offset=(-1, 1), labelTextColor='k')
+            for i, run in enumerate(selected):
                 data = pd.concat([self.DRS.background_data[run], self.DRS.intermediate_data[run]], axis=0)
                 for mass in self.mselected:
                     xdata = data.iloc[:, 0].to_list()
@@ -609,14 +553,13 @@ class MainWindow(QMainWindow):
                     if run in self.plotted.keys():
                         run_plot = self.plotted[run]
                         if mass in run_plot.keys():
-
                             plot = run_plot[mass]
                             plot.setData(xdata, ydata)
                         else:
                             _colorgen(run, mass)
                             run_colour = self.penDic[run]
                             pen = pg.mkPen(color=run_colour[mass], width=1)
-                            plot = self.ui.graphicsView.plot(xdata, ydata, pen=pen, name=run+' '+mass)
+                            plot = self.ui.graphicsView.plot(xdata, ydata, pen=pen, name=self.runselected[i]+' '+mass)
                             run_plot[mass] = plot
                             self.plotted[run] = run_plot
                     else:
@@ -625,22 +568,19 @@ class MainWindow(QMainWindow):
                         pen = pg.mkPen(color=run_colour[mass], width=1)
                         plot = self.ui.graphicsView.plot(xdata, ydata, name=run+' '+mass, pen=pen)
                         self.plotted[run] = {mass: plot}
-
-            for run in self.previous_runselected:
-                if run not in self.runselected and run in self.plotted.keys():
+            for run in previousselected:
+                if run not in selected and run in self.plotted.keys():
                     masses = self.plotted[run]
                     for key, mass_plot in masses.items():
                         self.ui.graphicsView.removeItem(mass_plot)
                     self.plotted.pop(run)
-            for run in self.runselected:
+            for run in selected:
                 masses = self.plotted[run]
-                for mass in self.previous_mselected:
+                for mass in previousselected:
                     if mass in masses and mass not in self.mselected:
                         self.ui.graphicsView.removeItem(masses[mass])
                         masses.pop(mass)
                         self.plotted[run] = masses
-
-        legend = self.ui.graphicsView.addLegend(offset=(-1, 1), labelTextColor='k')
 
         if len(self.runselected) > 0:
             if self.ui.checkBox_dfIndex.isChecked():
@@ -665,8 +605,37 @@ class MainWindow(QMainWindow):
             self.plotted = {}
             self.penDic = {}
 
+    def create_popup(self,title, message):
+        popup = QtWidgets.QMessageBox(self)
+        popup.setWindowTitle(title)
+        popup.setText(message)
+        popup.setIcon(QtWidgets.QMessageBox.Question)
+        popup.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        opt = popup.exec_()
+        return opt == QtWidgets.QMessageBox.Yes
+
+    def print_message(self, message):
+        QTimer.singleShot(0, lambda: self.ui.labelStatus.setText(message))
+        QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
+
+    def check_signal(self):
+        if not self.signal:
+            return self.create_popup('Signal warning',
+                                     f"You haven't especfied baseline and signal intervals."
+                                     "\nDo you want to continue with automatic intervals?")
+        else:
+            return True
+
+    def check_reduction_scheme(self):
+        if self.groups:
+            if self.check_signal():
+                self.reduction_scheme()
+            else:
+                self.open_signalDialog()
+        else:
+            self.print_message('ERROR! You should create group selections')
+
     def reduction_scheme(self):
-        sender = self.sender().objectName()
         gas = self.ui.comboBoxGas.currentText()
         Rb_85 = self.gases[gas][0]
         Sr_86 = self.gases[gas][1]
@@ -681,59 +650,38 @@ class MainWindow(QMainWindow):
         rm1_name = self.ui.comboBox_rm.currentText()
         rm2_name = self.ui.comboBox_rm2.currentText()
 
-        if sender == "btn_run":
-            if len(self.groups.keys()) > 0:
-                if self.signal:
-                    if fractionation:
-                        self.open_fractionationDialog(fractionation_method)
-                        fractionation = self.ui.checkBox_fractionation.isChecked()
-                        if not fractionation:
-                            return
-                    if massBias:
-                        self.DRS.mass_bias_correction(self.groups)
-
-                    if drift:
-                        if rm1_name in self.groups.keys() and rm1_name in self.database.keys():
-                            self.open_driftDialog(drift_method, rm1_name)
-                            drift = self.ui.checkBox_drift.isChecked()
-                            if not drift:
-                                return
-                        else:
-                            QTimer.singleShot(0, lambda: self.ui.labelStatus.setText(
-                                'ERROR! RM for drift correction should be in the database and in groups'))
-                            QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
-
-                    if matrix:
-                        if rm2_name in self.groups.keys() and rm2_name in self.database.keys():
-                            if drift:
-                                self.DRS.matrix_correction(self.groups, rm2_name, self.database)
-                            else:
-                                QTimer.singleShot(0, lambda: self.ui.labelStatus.setText(
-                                    'ERROR! no external correction has been performed'))
-                                QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
-                    else:
-                        QTimer.singleShot(0, lambda: self.ui.labelStatus.setText(
-                            'ERROR! RM for matrix correction should be in the database and in groups'))
-                        QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
-
-                    self.DRS.compute_results(self.groups)
-                    QTimer.singleShot(0, lambda: self.ui.labelStatus.setText('All selected data corrected!'))
-                    QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
-                else:
-                    # message here
-                    pass
+        self.DRS.background(self.handlefiles.alldatafiles, Rb_85)
+        self.DRS.background_subtraction()
+        self.DRS.Rb_calculation()
+        self.DRS.raw_ratios(Sr_86, Sr_87, Sr_88)
+        self.DRS.convertion_rate(Sr_88)
+        self.DRS.downhole_fractionation_index()
+        if fractionation:
+            self.open_fractionationDialog(fractionation_method)
+            fractionation = self.ui.checkBox_fractionation.isChecked()
+            if not fractionation:
+                return
+        if massBias:
+            self.DRS.mass_bias_correction(self.groups, self.handlelog.name_links)
+        if drift:
+            if rm1_name in self.groups.keys() and rm1_name in self.database.keys():
+                self.open_driftDialog(drift_method, rm1_name)
+                drift = self.ui.checkBox_drift.isChecked()
+                if not drift:
+                    return
             else:
-                QTimer.singleShot(0, lambda: self.ui.labelStatus.setText('ERROR! You should create group selections'))
-                QTimer.singleShot(6000, lambda: self.ui.labelStatus.setText(''))
+                self.print_message('ERROR! RM for drift correction should be in the database and in groups')
+        if matrix:
+            if rm2_name in self.groups.keys() and rm2_name in self.database.keys():
+                if drift:
+                    self.DRS.matrix_correction(self.groups, rm2_name, self.database)
+                else:
+                    self.print_message('ERROR! no external correction has been performed')
         else:
-            self.DRS.background(self.handlefiles.alldatafiles, Rb_85)
-            self.DRS.background_subtraction()
-            self.DRS.Rb_calculation()
-            self.DRS.raw_ratios(Sr_86, Sr_87, Sr_88)
-            self.DRS.convertion_rate(Sr_88)
-            self.DRS.downhole_fractionation_index()
-
-            self.populate_table()
+            self.print_message('ERROR! RM for matrix correction should be in the database and in groups')
+        self.DRS.compute_results(self.groups, self.handlelog.name_links)
+        self.print_message('All selected data corrected!')
+        self.populate_table()
 
 
 if __name__ == "__main__":

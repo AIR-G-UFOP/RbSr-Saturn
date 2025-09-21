@@ -4,12 +4,13 @@ import numpy as np
 
 from module.core import *
 from ui.signalDialog import Ui_Signal
+from module.utils import get_unique_name, get_log_name
 
 
 class SignalDialog(QDialog):
     signal_return = pyqtSignal(bool, dict)
 
-    def __init__(self, parent, raw, index, all_points, channels, limits):
+    def __init__(self, parent, raw, index, all_points, channels, limits, link, log):
         super(SignalDialog, self).__init__(parent)
 
         self.ui = Ui_Signal()
@@ -27,6 +28,8 @@ class SignalDialog(QDialog):
         self.channels = channels
         self.limits = limits
         self.initial_limits = limits
+        self.name_links = link
+        self.names_log = log
         self.viewboxes = {}
         self.curves = {}
         self.axes = {}
@@ -89,18 +92,17 @@ class SignalDialog(QDialog):
 
     def fill_combo(self):
         if self.all_points:
-            self.ui.comboBox_spot.addItems(self.all_points.keys())
+            names = get_log_name(self.name_links, self.all_points, self.names_log)
+            self.ui.comboBox_spot.addItems(names)
 
     def fill_list(self):
         if self.channels:
             self.ui.listWidget_channels.addItems(self.channels[1:])
-
             self.ui.listWidget_channels.setCurrentRow(0)
             self.select_channels(self.ui.listWidget_channels.selectedItems())
 
     def select_channels(self, items):
         self.channel_selected = [item.text() for item in items]
-
         if len(self.channel_selected) > 0:
             self.plot_data()
         else:
@@ -108,7 +110,7 @@ class SignalDialog(QDialog):
 
     def plot_data(self):
         if self.raw_data:
-            if len(self.viewboxes.keys()) > 0:
+            if self.viewboxes:
                 vb = self.viewboxes.copy()
                 for channel in vb.keys():
                     if channel not in self.channel_selected:
@@ -136,7 +138,9 @@ class SignalDialog(QDialog):
             self.pen[channel] = colour
 
     def _add_curve(self, channel):
-        x, y = self._get_data(channel, self.ui.comboBox_spot.currentText())
+        name_log = self.ui.comboBox_spot.currentText()
+        unique_name = get_unique_name(self.name_links, [name_log])[0]
+        x, y = self._get_data(channel, unique_name)
         self._colourgen(channel)
 
         if not self.viewboxes:
@@ -160,10 +164,10 @@ class SignalDialog(QDialog):
         self.curves[channel] = curve
 
     def _update_curve(self, channel):
-        # Getting data
-        x, y = self._get_data(channel, self.ui.comboBox_spot.currentText())
+        name_log = self.ui.comboBox_spot.currentText()
+        unique_name = get_unique_name(self.name_links, [name_log])[0]
+        x, y = self._get_data(channel, unique_name)
         curve = self.curves[channel]
-        # Updating curve
         curve.setData(x, y)
 
     def _remove_curve(self, channel):
@@ -223,10 +227,11 @@ class SignalDialog(QDialog):
 
     def _update_regions_of_interest(self):
         self._set_regions_of_interest_signal(True)
-        data = self.raw_data[self.spot_name]
+        name = get_unique_name(self.name_links, [self.spot_name])[0]
+        data = self.raw_data[name]
         rows = len(data.index)
         try:
-            limits = self.limits[self.spot_name]
+            limits = self.limits[name]
             min_bkg = limits[0]
             max_bkg = limits[1]
             min_sig = limits[2]
@@ -254,7 +259,8 @@ class SignalDialog(QDialog):
     def _get_regions_of_interest_limits(self):
         min_sig, max_sig = self.region_sig.getRegion()
         min_bkg, max_bkg = self.region_bkg.getRegion()
-        previous_limits = self.limits[self.spot_name]
+        name = get_unique_name(self.name_links, [self.spot_name])[0]
+        previous_limits = self.limits[name]
         if min_bkg >= min_sig:
             min_bkg = previous_limits[0]
             max_bkg = previous_limits[1]
@@ -266,14 +272,15 @@ class SignalDialog(QDialog):
         self.region_bkg.setRegion([min_bkg, max_bkg])
         self.region_sig.setRegion([min_sig, max_sig])
         self._set_regions_of_interest_signal(False)
-        self.limits[self.spot_name] = [min_bkg, max_bkg, min_sig, max_sig]
+        self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]
         self._get_limits_from_data()
 
     def _get_limits_from_data(self):
-        limits = np.array(self.limits[self.spot_name])
-        t_values = self.raw_data[self.spot_name].iloc[:, 0].values
+        name = get_unique_name(self.name_links, [self.spot_name])[0]
+        limits = np.array(self.limits[name])
+        t_values = self.raw_data[name].iloc[:, 0].values
         min_bkg = t_values[np.abs(t_values - limits[0]).argmin()]
         max_bkg = t_values[np.abs(t_values - limits[1]).argmin()]
         min_sig = t_values[np.abs(t_values - limits[2]).argmin()]
         max_sig = t_values[np.abs(t_values - limits[3]).argmin()]
-        self.limits[self.spot_name] = [min_bkg, max_bkg, min_sig, max_sig]
+        self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]

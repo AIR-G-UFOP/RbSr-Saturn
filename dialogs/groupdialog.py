@@ -1,14 +1,13 @@
 import os.path
-
 from module.core import *
-
+from module.utils import get_log_name, get_unique_name
 from ui.GroupDialog import Ui_GroupDialog
 
 
 class GroupDialog(QDialog):
     group_return = pyqtSignal(dict)
 
-    def __init__(self, parent, run_names, database, names_log):
+    def __init__(self, parent, run_names, database, name_links, log_names):
         super(GroupDialog, self).__init__(parent)
 
         self.parent = parent
@@ -34,7 +33,8 @@ class GroupDialog(QDialog):
         self.defined_groups = {}
         self.run_names = run_names
         self.database = database
-        self.names_log = names_log
+        self.name_links = name_links
+        self.log_names = log_names
 
         self.populate_list_and_combo()
 
@@ -60,22 +60,19 @@ class GroupDialog(QDialog):
         self.close()
 
     def populate_list_and_combo(self):
-        if len(self.names_log.keys()) > 0:
-            names = list(self.names_log.keys())
-        else:
-            names = self.run_names
-
+        names = get_log_name(self.name_links, self.run_names, self.log_names)
         self.ui.listWidget.addItems(names)
         self.ui.comboBox_name.addItems(self.database.keys())
 
     def create_group(self):
         items = [item.text() for item in self.ui.listWidget.selectedItems() if not item.isHidden()]
+        items = get_unique_name(self.name_links, items)
         name = self.ui.comboBox_name.currentText()
 
-        if len(items) > 0:
+        if items:
             self.defined_groups[name] = items
             self.ui.listWidget.clearSelection()
-            self.ui.label_status.setStyleSheet('color: #ff5555;')
+            self.ui.label_status.setStyleSheet('color: black')
             QTimer.singleShot(0, lambda: self.ui.label_status.setText(f'Group {name} created'))
             QTimer.singleShot(6000, lambda: self.ui.label_status.setText(''))
         else:

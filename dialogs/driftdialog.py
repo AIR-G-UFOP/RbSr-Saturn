@@ -1,14 +1,14 @@
 import numpy as np
 
 from module.core import *
-from module.drs import DRS
+from module.utils import get_unique_name
 from ui.driftDialog import Ui_Drift
 
 
 class DriftDialog(QDialog):
     drift_return = pyqtSignal(bool)
 
-    def __init__(self, parent, DRS, database, groups, method, rm, all_names):
+    def __init__(self, parent, DRS, database, groups, method, rm, all_names, link):
         super(DriftDialog, self).__init__(parent)
 
         self.ui = Ui_Drift()
@@ -27,6 +27,7 @@ class DriftDialog(QDialog):
         self.DRS = DRS
         self.database = database
         self.all_names = all_names
+        self.links = link
         self.factors = None
         self.x = None
         self.y = None
@@ -143,10 +144,8 @@ class DriftDialog(QDialog):
                 for i, x_i in enumerate(self.x):
                     y_i = self.y[ratio][i]
                     new_y = f * y_i  # scaled value
-
                     # Draw a line in plot coordinates
                     plotR.plot([x_i, x_i], [y_i, new_y], pen=pg.mkPen('r'))
-
                     # Add arrowhead at the new point
                     arrow = pg.ArrowItem(angle=angle, headLen=4, headWidth=4, brush='r', pen='r')
                     arrow.setPos(x_i, new_y)
@@ -172,17 +171,21 @@ class DriftDialog(QDialog):
         self.check_method(method)
 
         if method == 'Average':
-            self.factors, self.x, self.y, self.y_std = self.DRS.average_factor(self.groups, rm, self.database, self.all_names)
+            self.factors, self.x, self.y, self.y_std = self.DRS.average_factor(self.groups, rm, self.database,
+                                                                               self.all_names, self.links)
         elif method == 'Polynomial':
-            self.factors, self.x, self.y, self.y_std = self.DRS.polynomial_factor(self.groups, rm, self.database, self.all_names, degree)
+            self.factors, self.x, self.y, self.y_std = self.DRS.polynomial_factor(self.groups, rm, self.all_names,
+                                                                                  degree, self.links)
         else:
-            self.factors, self.x, self.y, self.y_std = self.DRS.spline_factor(self.groups, rm, self.all_names, s)
+            self.factors, self.x, self.y, self.y_std = self.DRS.spline_factor(self.groups, rm, self.all_names, s,
+                                                                              self.links)
 
         self.plot_data()
 
     def plot_data_corrected(self):
         rm = self.ui.comboBox_rm.currentText()
         db = self.database[rm]
+        selections = self.groups[rm]
 
         self.ui.graphicsView.clear()
         view = self.ui.graphicsView
@@ -196,7 +199,7 @@ class DriftDialog(QDialog):
 
             y = []
             y_std = []
-            for name in self.groups[rm]:
+            for name in selections:
                 y_i = self.DRS.intermediate_data[name][ratioCorr].mean()
                 y_std_i = self.DRS.intermediate_data[name][ratioCorr].std()
                 y.append(y_i)
@@ -221,7 +224,7 @@ class DriftDialog(QDialog):
         rm = self.ui.comboBox_rm.currentText()
         true_values = self.database[rm]
 
-        self.DRS.drift_correction(method, self.groups, self.factors, degree, true_values, self.all_names)
+        self.DRS.drift_correction(method, self.groups, self.factors, degree, true_values, self.all_names, self.links)
         self.drift_applied = True
 
         self.plot_data_corrected()

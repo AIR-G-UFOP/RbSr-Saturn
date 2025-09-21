@@ -1,11 +1,12 @@
 from module.core import *
+from module.utils import get_unique_name, get_log_name
 from ui.FractionationDialog import Ui_Fractionation
 
 
 class FractionationDialog(QDialog):
     fractionation_return = pyqtSignal(bool)
 
-    def __init__(self, parent, groups, DRS, method):
+    def __init__(self, parent, groups, DRS, method, handlelog):
         super(FractionationDialog, self).__init__(parent)
 
         self.ui = Ui_Fractionation()
@@ -28,6 +29,7 @@ class FractionationDialog(QDialog):
 
         self.groups = groups
         self.DRS = DRS
+        self.handlelog = handlelog
         self.parameters = None
         self.cov = None
         self.selections_mean_r = None
@@ -68,8 +70,7 @@ class FractionationDialog(QDialog):
         self.ui.comboBox_group.clear()
         self.ui.comboBox_group.addItems(self.groups.keys())
 
-    def plot_data(self):
-        def calc_y_interp(x, method):
+    def _calc_y_interp(self, x, method):
             if method == 'Exponential':
                 return self.parameters[0] + self.parameters[1] * np.exp(-self.parameters[2] * x)
             elif method == 'Linear':
@@ -79,8 +80,10 @@ class FractionationDialog(QDialog):
             elif method == 'Smoothing spline':
                 return self.parameters(x)
 
+    def plot_data(self):
         group = self.ui.comboBox_group.currentText()
         group_selections = self.groups[group]
+        group_selections_show = get_log_name(self.handlelog.name_links, group_selections, self.handlelog.names_log)
         method = self.ui.comboBox_method.currentText()
 
         self.ui.graphicsView.clear()
@@ -90,11 +93,11 @@ class FractionationDialog(QDialog):
             selection_data = self.DRS.intermediate_data[name]
             x = selection_data.iloc[:, 0].to_numpy()
             y = selection_data.loc[:, 'Rb87/Sr86_raw'].to_numpy()
-            self.ui.graphicsView.plot(x, y, name=name)
+            self.ui.graphicsView.plot(x, y, name=group_selections_show[i])
 
         x_mean = self.selections_mean_t
         y_mean = self.selections_mean_r
-        y_interp = calc_y_interp(x_mean, method)
+        y_interp = self._calc_y_interp(x_mean, method)
         self.ui.graphicsView.plot(x_mean, y_mean, pen=pg.mkPen(color='black', width=1), name=group + '_mean')
         self.ui.graphicsView.plot(x_mean, y_interp, pen=pg.mkPen(color='red', width=1), name=group + '_DF')
 
