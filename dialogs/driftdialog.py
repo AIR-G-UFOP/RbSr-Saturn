@@ -172,13 +172,12 @@ class DriftDialog(QDialog):
 
         if method == 'Average':
             self.factors, self.x, self.y, self.y_std = self.DRS.average_factor(self.groups, rm, self.database,
-                                                                               self.all_names, self.links)
+                                                                               self.all_names)
         elif method == 'Polynomial':
             self.factors, self.x, self.y, self.y_std = self.DRS.polynomial_factor(self.groups, rm, self.all_names,
-                                                                                  degree, self.links)
+                                                                                  degree)
         else:
-            self.factors, self.x, self.y, self.y_std = self.DRS.spline_factor(self.groups, rm, self.all_names, s,
-                                                                              self.links)
+            self.factors, self.x, self.y, self.y_std = self.DRS.spline_factor(self.groups, rm, self.all_names, s)
 
         self.plot_data()
 
@@ -224,7 +223,7 @@ class DriftDialog(QDialog):
         rm = self.ui.comboBox_rm.currentText()
         true_values = self.database[rm]
 
-        self.DRS.drift_correction(method, self.groups, self.factors, degree, true_values, self.all_names, self.links)
+        self.DRS.drift_correction(method, self.groups, self.factors, degree, true_values, self.all_names)
         self.drift_applied = True
 
         self.plot_data_corrected()

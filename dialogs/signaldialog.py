@@ -78,17 +78,18 @@ class SignalDialog(QDialog):
         self.move(x, y)
 
     def closeEvent(self, event):
+        print(self.sender().objectName())
         if self.sender().objectName() != 'btn_cancel' and self.sender().objectName() != 'btn_ok':
             self.signal_return.emit(False, self.initial_limits)
-        self.close()
+            self.close()
 
     def btn_clicked(self):
         btn = self.sender().objectName()
+        self.close()
         if btn == 'btn_cancel':
             self.signal_return.emit(False, self.initial_limits)
         else:
             self.signal_return.emit(True, self.limits)
-        self.close()
 
     def fill_combo(self):
         if self.all_points:
@@ -272,15 +273,23 @@ class SignalDialog(QDialog):
         self.region_bkg.setRegion([min_bkg, max_bkg])
         self.region_sig.setRegion([min_sig, max_sig])
         self._set_regions_of_interest_signal(False)
-        self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]
+        if self.ui.checkBox_applyToAll.isChecked():
+            for name in self.all_points:
+                self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]
+        else:
+            self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]
         self._get_limits_from_data()
 
     def _get_limits_from_data(self):
-        name = get_unique_name(self.name_links, [self.spot_name])[0]
-        limits = np.array(self.limits[name])
-        t_values = self.raw_data[name].iloc[:, 0].values
-        min_bkg = t_values[np.abs(t_values - limits[0]).argmin()]
-        max_bkg = t_values[np.abs(t_values - limits[1]).argmin()]
-        min_sig = t_values[np.abs(t_values - limits[2]).argmin()]
-        max_sig = t_values[np.abs(t_values - limits[3]).argmin()]
-        self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]
+        if self.ui.checkBox_applyToAll.isChecked():
+            names = self.all_points
+        else:
+            names = get_unique_name(self.name_links, [self.spot_name])
+        for name in names:
+            limits = np.array(self.limits[name])
+            t_values = self.raw_data[name].iloc[:, 0].values
+            min_bkg = t_values[np.abs(t_values - limits[0]).argmin()]
+            max_bkg = t_values[np.abs(t_values - limits[1]).argmin()]
+            min_sig = t_values[np.abs(t_values - limits[2]).argmin()]
+            max_sig = t_values[np.abs(t_values - limits[3]).argmin()]
+            self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]

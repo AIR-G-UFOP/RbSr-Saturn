@@ -213,7 +213,7 @@ class MainWindow(QMainWindow):
         self.overlay.hide()
         if not opt:
             self.ui.checkBox_fractionation.setCheckState(Qt.Unchecked)
-            self.DRS.remove_correction('downhole', self.groups, self.handlelog.name_links)
+            self.DRS.remove_correction('downhole', self.groups)
             return
 
     def open_driftDialog(self, method, rm):
@@ -229,7 +229,7 @@ class MainWindow(QMainWindow):
         self.overlay.hide()
         if not opt:
             self.ui.checkBox_drift.setCheckState(Qt.Unchecked)
-            self.DRS.remove_correction('drift', self.groups, self.handlelog.name_links)
+            self.DRS.remove_correction('drift', self.groups)
             return
 
     def open_signalDialog(self):
@@ -290,7 +290,7 @@ class MainWindow(QMainWindow):
         self.handlefiles.open_data_files()
         self.populate_list_masses()
         self.populate_list_names()
-        self.DRS.background(self.handlefiles.alldatafiles, self.gases[self.ui.comboBoxGas.currentText()][3])
+        self.DRS.get_limits(self.handlefiles.alldatafiles, self.gases[self.ui.comboBoxGas.currentText()][3])
 
     def load_log(self):
         if len(self.handlefiles.alldatafiles.keys()) > 0:
@@ -383,9 +383,10 @@ class MainWindow(QMainWindow):
                             obj.blockSignals(False)
 
         def _fill_table_single_mode(cols):
-            if len(self.runselected) > 0:
-                name = self.runselected[-1]
-                if len(self.DRS.intermediate_data.keys()) > 0:
+            if self.runselected:
+                selected = get_unique_name(self.handlelog.name_links, self.runselected)
+                name = selected[-1]
+                if self.DRS.intermediate_data.keys():
                     self.ui.tableWidget.clear()
                     data = self.DRS.intermediate_data[name]
                     rows = data.iloc[:, 0].astype(str)
@@ -582,7 +583,7 @@ class MainWindow(QMainWindow):
                         masses.pop(mass)
                         self.plotted[run] = masses
 
-        if len(self.runselected) > 0:
+        if self.runselected:
             if self.ui.checkBox_dfIndex.isChecked():
                 self.previous_mselected = self.mselected
                 self.mselected = ['Rb87/Sr86_DF']
@@ -593,7 +594,7 @@ class MainWindow(QMainWindow):
                     else:
                         item.setSelected(True)
             else:
-                if len(self.mselected) == 0:
+                if not self.mselected:
                     self.previous_mselected = self.mselected
                     self.ui.listWidget_masses.setCurrentRow(0)
                     self.mselected = [self.ui.listWidget_masses.currentItem().text()]
@@ -650,7 +651,7 @@ class MainWindow(QMainWindow):
         rm1_name = self.ui.comboBox_rm.currentText()
         rm2_name = self.ui.comboBox_rm2.currentText()
 
-        self.DRS.background(self.handlefiles.alldatafiles, Rb_85)
+        self.DRS.background(self.handlefiles.alldatafiles)
         self.DRS.background_subtraction()
         self.DRS.Rb_calculation()
         self.DRS.raw_ratios(Sr_86, Sr_87, Sr_88)
@@ -662,7 +663,7 @@ class MainWindow(QMainWindow):
             if not fractionation:
                 return
         if massBias:
-            self.DRS.mass_bias_correction(self.groups, self.handlelog.name_links)
+            self.DRS.mass_bias_correction(self.groups)
         if drift:
             if rm1_name in self.groups.keys() and rm1_name in self.database.keys():
                 self.open_driftDialog(drift_method, rm1_name)

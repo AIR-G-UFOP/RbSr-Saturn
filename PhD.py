@@ -104,105 +104,100 @@ def plot_patterns():
 
 def plot_DF_all_data():
     colours = ['#000000', '#9E9B99', '#66CCEE', '#FFC20A', '#0C7BDC', '#E66100', '#5D3A9B', '#D41159', '#D35FB7', '#1AFF1A', '#994f00', '#FF0000']
-    # RM = ['LaPosta_V', 'LaPosta_H', '610', 'MD4B_V', 'MD4B_H', 'MicaMg', 'Hogsbo_V', 'Hogsbo_H', 'MicaFe', 'WP1_V', 'WP1_H']
-    RM = ['MD4B_V-20', 'MD4B_V-40', 'MD4B_V-65', 'MD4B_V-85', 'MD4B_V-110',
-          'MD4B_H-20', 'MD4B_H-40', 'MD4B_H-65', 'MD4B_H-85', 'MD4B_H-110',
-          'MicaMg-20', 'MicaMg-40', 'MicaMg-65', 'MicaMg-85', 'MicaMg-110',
-          '610-20', '610-40', '610-65', '610-85', '610-110']
+    RM = ['LaPosta_V', 'LaPosta_H', '610', 'MD4B_V', 'MD4B_H', 'MicaMg', 'Hogsbo_V', 'Hogsbo_H'] #, 'MicaFe', 'WP1_V', 'WP1_H']
     DFI = {}
     all_data = {name: [] for name in RM}
     data_each_run = {name: {} for name in RM}
 
-    dir_path = r'data1'
+    dir_path = r'data'
     file_pathern = os.path.join(dir_path, '*.xlsx')
     data_files = glob.glob(file_pathern)
 
-    fig, axes = plt.subplots(nrows=4, ncols=5, layout='constrained')
+    fig, axes = plt.subplots(nrows=3, ncols=3, layout='constrained')
     axes = axes.flatten()
     for i, file in enumerate(data_files):
         file_name = os.path.splitext(os.path.basename(file))[0]
         if file_name == '20250203-UoP' or file_name == '20260626_UoP_Batch3':
             raw_data = open_grouped_data(file)
-            pass
         else:
             raw_data = open_ungrouped_data(file)
-            DF_data, DFI_data = df_patterns_calc(raw_data)
-            DFI[file_name] = DFI_data
-            for name, data in DF_data.items():
-                if name != 'WP1_V' and name != 'WP1_H' and name != 'MicaFe':
-                    row = RM.index(name+'-'+file_name)
-                    time = data.iloc[:, 0]
-                    norm_data = data.iloc[:, 1:] #.mean(axis=1)
+        DF_data, DFI_data = df_patterns_calc(raw_data)
+        DFI[file_name] = DFI_data
+        for name, data in DF_data.items():
+            if name != 'WP1_V' and name != 'WP1_H' and name != 'MicaFe':
+                row = RM.index(name)
+                time = data.iloc[:, 0]
+                norm_data = data.iloc[:, 1:].mean(axis=1)
 
-                    run_data_and_mean = pd.concat([data, norm_data.mean(axis=1).rename('mean')], axis=1)
-                    material = data_each_run[name+'-'+file_name]
-                    material[file_name] = run_data_and_mean
+                run_data_and_mean = pd.concat([data, norm_data.mean(axis=1).rename('mean')], axis=1)
+                material = data_each_run[name+'-'+file_name]
+                material[file_name] = run_data_and_mean
 
-                    list = all_data[name+'-'+file_name]
-                    list.append(pd.DataFrame(data=norm_data.values, index=time.values))
+                list = all_data[name+'-'+file_name]
+                list.append(pd.DataFrame(data=norm_data.values, index=time.values))
 
-                    axes[row].plot(time, norm_data, label=name+'-'+file_name)
-                    axes[row].plot(time, norm_data.mean(axis=1), color='black')
-                    axes[row].set_title(name+'-'+file_name)
-                    axes[row].set_ylim(0.5, 1.5)
-                    # axes[row].legend(ncol=2, loc='upper right', fontsize=8, columnspacing=0.5)
+                axes[row].plot(time, norm_data, label=name, color=colours[i])
+                # axes[row].plot(time, norm_data.mean(axis=1), color='black')
+                axes[row].set_title(name)
+                axes[row].set_ylim(0.5, 1.5)
+                # axes[row].legend(ncol=2, loc='upper right', fontsize=8, columnspacing=0.5)
 
-                    axes[row].set_xlabel('Ablation time (s)')
-                    axes[row].set_ylabel('Norm Rb/Sr')
+                axes[row].set_xlabel('Ablation time (s)')
+                axes[row].set_ylabel('Norm Rb/Sr')
 
-    # from statsmodels.nonparametric.smoothers_lowess import lowess
-    # all_data_mean = {}
-    # for name, list in all_data.items():
-    #     try:
-    #         all_times = [df.index.to_numpy() for df in list]
-    #         all_times = np.unique(np.concatenate(all_times))
-    #         common_times = np.linspace(all_times.min(), all_times.max(), 200)
-    #
-    #         interpolated_dfs = []
-    #         for df in list:
-    #             # Ensure sorted index and numeric
-    #             df = df.sort_index()
-    #             df.index = df.index.astype(float)
-    #
-    #             # Interpolate to make time a continuous function
-    #             df_interp = df.interpolate(method='index', limit_direction='both')
-    #
-    #             # Now use numpy.interp for each column to ensure smooth interpolation
-    #             df_uniform = pd.DataFrame(index=common_times)
-    #
-    #             for col in df.columns:
-    #                 # Drop NaNs to avoid crashing interp
-    #                 valid = df_interp[col].dropna()
-    #                 if len(valid) < 2:
-    #                     # Not enough points to interpolate — skip or fill
-    #                     df_uniform[col] = np.nan
-    #                 else:
-    #                     df_uniform[col] = np.interp(common_times, valid.index, valid.values)
-    #
-    #             interpolated_dfs.append(df_uniform)
-    #
-    #         # Combine and average (ignoring NaNs)
-    #         combined = pd.concat(interpolated_dfs)
-    #         mean_df = combined.groupby(combined.index).mean()
-    #         all_data_mean[name] = mean_df
-    #         std_df = combined.groupby(combined.index).std()
-    #         n = combined.groupby(combined.index).count()
-    #         x = mean_df.index.to_numpy()
-    #         y = mean_df.iloc[:, 0].to_numpy()
-    #         lowess_r = np.array(lowess(endog=y, exog=x, frac=0.15, return_sorted=False))
-    #         stderr = (std_df.iloc[:, 0] / np.sqrt(n.iloc[:, 0])).to_numpy()
-    #         upper = lowess_r + 1.96 * stderr
-    #         lower = lowess_r - 1.96 * stderr
-    #
-    #         axes[RM.index(name)].plot(x, lowess_r, 'black', label=name+'_LOWESS')
-    #         axes[RM.index(name)].fill_between(x, lower, upper, color='black', alpha=0.1, label='95% Envelope')
-    #     except ValueError:
-    #         pass
+    from statsmodels.nonparametric.smoothers_lowess import lowess
+    all_data_mean = {}
+    for name, list in all_data.items():
+        try:
+            all_times = [df.index.to_numpy() for df in list]
+            all_times = np.unique(np.concatenate(all_times))
+            common_times = np.linspace(all_times.min(), all_times.max(), 200)
 
-    with pd.ExcelWriter('DF_index_spot_sizes_test.xlsx', engine='xlsxwriter') as writer:
-        for sheet_name, d in DFI.items():
-            DF = pd.DataFrame.from_dict(d, orient='index')
-            DF.to_excel(writer, sheet_name=sheet_name, index=True)
+            interpolated_dfs = []
+            for df in list:
+                # Ensure sorted index and numeric
+                df = df.sort_index()
+                df.index = df.index.astype(float)
+
+                # Interpolate to make time a continuous function
+                df_interp = df.interpolate(method='index', limit_direction='both')
+
+                # Now use numpy.interp for each column to ensure smooth interpolation
+                df_uniform = pd.DataFrame(index=common_times)
+
+                for col in df.columns:
+                    # Drop NaNs to avoid crashing interp
+                    valid = df_interp[col].dropna()
+                    if len(valid) < 2:
+                        # Not enough points to interpolate — skip or fill
+                        df_uniform[col] = np.nan
+                    else:
+                        df_uniform[col] = np.interp(common_times, valid.index, valid.values)
+
+                interpolated_dfs.append(df_uniform)
+
+            # Combine and average (ignoring NaNs)
+            combined = pd.concat(interpolated_dfs)
+            mean_df = combined.groupby(combined.index).mean()
+            all_data_mean[name] = mean_df
+            std_df = combined.groupby(combined.index).std()
+            n = combined.groupby(combined.index).count()
+            x = mean_df.index.to_numpy()
+            y = mean_df.iloc[:, 0].to_numpy()
+            lowess_r = np.array(lowess(endog=y, exog=x, frac=0.15, return_sorted=False))
+            stderr = (std_df.iloc[:, 0] / np.sqrt(n.iloc[:, 0])).to_numpy()
+            upper = lowess_r + 1.96 * stderr
+            lower = lowess_r - 1.96 * stderr
+
+            axes[RM.index(name)].plot(x, lowess_r, 'black', label=name+'_LOWESS')
+            axes[RM.index(name)].fill_between(x, lower, upper, color='black', alpha=0.1, label='95% Envelope')
+        except ValueError:
+            pass
+
+    # with pd.ExcelWriter('DF_index_spot_sizes_test.xlsx', engine='xlsxwriter') as writer:
+    #     for sheet_name, d in DFI.items():
+    #         DF = pd.DataFrame.from_dict(d, orient='index')
+    #         DF.to_excel(writer, sheet_name=sheet_name, index=True)
     #
     # for name, run in data_each_run.items():
     #     with pd.ExcelWriter(name + '_DF_patterns_and_mean.xlsx', engine='xlsxwriter') as writer:
@@ -489,7 +484,6 @@ class Window(QDialog):
 #     window.show()
 #     sys.exit(app.exec_())
 
-# plot_DF_all_data()
-from pyqtgraph import examples
-examples.run()
+plot_DF_all_data()
+
 
