@@ -12,7 +12,9 @@ class DRS:
 
         self.line_index = None
         self.limits = {}
+        self.signal_data_raw = {}  # signal sweeps of all files imported
         self.signal_data = {}  # signal sweeps of all files imported
+        self.background_data_raw = {}  # background sweeps of all files imported
         self.background_data = {}  # background sweeps of all files imported
         self.signal_mean = {}  # signal mean of all files imported
         self.background_mean = {}  # background mean of all files imported
@@ -22,8 +24,8 @@ class DRS:
         self.results = None
 
     def get_limits(self, dict_initial, mass_index):
-        self.background_data = {}
-        self.signal_data = {}
+        self.background_data_raw = {}
+        self.signal_data_raw = {}
         for name, data in dict_initial.items():
             mass_index_mean = data[mass_index].mean()
             index_counter = 0
@@ -45,16 +47,20 @@ class DRS:
             background_data = data.iloc[:self.line_index]
             run_data = data.iloc[self.line_index:]
             self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]
-            self.background_data[name] = background_data
-            self.signal_data[name] = run_data
+            self.background_data_raw[name] = background_data
+            self.signal_data_raw[name] = run_data
 
     def background(self, dict_initial):
+        self.background_data = {}
+        self.signal_data = {}
         self.signal_mean = {}
         self.background_mean = {}
         for name, data in dict_initial.items():
             limits = self.limits[name]
             background_data_for_mean = data[(data.iloc[:, 0] >= limits[0]) & (data.iloc[:, 0] <= limits[1])]
             run_data_for_mean = data[(data.iloc[:, 0] >= limits[2]) & (data.iloc[:, 0] <= limits[3])]
+            self.background_data[name] = background_data_for_mean
+            self.signal_data[name] = run_data_for_mean
             self.background_mean[name] = background_data_for_mean.mean()
             self.signal_mean[name] = run_data_for_mean.mean()
 

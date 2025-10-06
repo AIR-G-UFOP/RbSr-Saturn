@@ -78,7 +78,6 @@ class SignalDialog(QDialog):
         self.move(x, y)
 
     def closeEvent(self, event):
-        print(self.sender().objectName())
         if self.sender().objectName() != 'btn_cancel' and self.sender().objectName() != 'btn_ok':
             self.signal_return.emit(False, self.initial_limits)
             self.close()
