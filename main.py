@@ -18,6 +18,7 @@ from widgets.overlaywidget import LoadingOverlay
 from dialogs.fractionationdialog import FractionationDialog
 from dialogs.driftdialog import DriftDialog
 from dialogs.signaldialog import SignalDialog
+from dialogs.exportDataDialog import ExportDataDialog
 
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
@@ -66,7 +67,7 @@ class MainWindow(QMainWindow):
         self.ui.btn_log.clicked.connect(self.load_log)
         self.ui.btn_new.clicked.connect(self.restart_app)
         self.ui.btn_addfile.clicked.connect(self.load_file)
-        self.ui.btn_export.clicked.connect(self.export_data)
+        self.ui.btn_export.clicked.connect(self.open_exportDataDialog)
         self.ui.btn_signal.clicked.connect(self.open_signalDialog)
         self.ui.btn_RM.clicked.connect(self.open_materialsDialog)
 
@@ -252,6 +253,19 @@ class MainWindow(QMainWindow):
                                  '\nDo you want to run the reduction scheme?'):
                 self.check_reduction_scheme()
 
+    def open_exportDataDialog(self):
+        self.overlay.show()
+        self.exportDialog = ExportDataDialog(self, self.groups, self.handlefiles.data_head)
+        self.exportDialog.setWindowModality(Qt.WindowModal)
+        self.exportDialog.export_return.connect(self.return_exportDialog)
+        self.exportDialog.exec_()
+
+    @pyqtSlot(bool, dict)
+    def return_exportDialog(self, status, opts):
+        if status:
+            self.export_data(opts)
+        self.overlay.hide()
+
     def restart_app(self):
         self.close()
         os.execl(sys.executable, sys.executable, *sys.argv)
@@ -319,24 +333,92 @@ class MainWindow(QMainWindow):
             else:
                 self.print_message('ERROR! Could not import log file')
 
-    def export_data(self):
-        if isinstance(self.DRS.results, pd.DataFrame):
-            with pd.ExcelWriter('results.xlsx') as writer:
-                self.DRS.results.to_excel(writer, sheet_name='Data', index=True)
-
-        # if len(self.handlefiles.alldatafiles.keys()) > 0:
-        #     signal = self.signal.reindex(self.batchlog.loc[:, 'Sample Name'])
-        #     background = self.background.reindex(self.batchlog.loc[:, 'Sample Name'])
-        #     ratios = self.ratios.reindex(self.batchlog.loc[:, 'Sample Name'])
-        #     convertion = self.convertion_rate.reindex(self.batchlog.loc[:, 'Sample Name'])
-        #
-        #     path = tk.filedialog.asksaveasfilename(title="Export Data", filetypes=[('Excel file', '*.xlsx')])
-        #
-        #     with pd.ExcelWriter(path + '.xlsx') as writer:
-        #         signal.to_excel(writer, sheet_name='Average_signal', index=True)
-        #         background.to_excel(writer, sheet_name='Average_background', index=True)
-        #         ratios.to_excel(writer, sheet_name='ratio', index=True)
-        #         convertion.to_excel(writer, sheet_name='Convertion_rate', index=True)
+    def export_data(self, opts):
+        if opts['Results']:
+            if isinstance(self.DRS.results, pd.DataFrame):
+                with pd.ExcelWriter('results.xlsx') as writer:
+                    self.DRS.results.to_excel(writer, sheet_name='Data', index=True)
+            else:
+                self.print_message('No results to export.')
+        if opts['Time Series']:
+            if self.handlefiles.alldatafiles:
+                # get selections and channels
+                channels = opts['Channels']
+                groups = opts['Groups']
+                if groups:
+                    selections = [selection for group in groups for selection in self.groups[group]]
+                else:
+                    selections = list(self.handlefiles.alldatafiles.keys())
+                selections = get_log_name(self.handlelog.name_links,
+                                                    selections,
+                                                    self.handlelog.names_log)
+                # get the path to save
+                path = tk.filedialog.asksaveasfilename(title="Export Time Series Data",
+                                                       filetypes=[('Excel file', '*.xlsx')])
+                # save data to excel
+                if path:
+                    if not os.path.splitext(os.path.basename(path))[1] == '.xlsx':
+                        path = path + '.xlsx'
+                    with pd.ExcelWriter(path) as writer:
+                        try:
+                            for name, data in self.handlefiles.alldatafiles.items():
+                                if not channels:
+                                    channels = data.columns.to_list()
+                                name = get_log_name(self.handlelog.name_links,
+                                                    [name],
+                                                    self.handlelog.names_log)[0]
+                                if name in selections:
+                                    data[channels].to_excel(writer, sheet_name=name, index=False)
+                                    # applying style
+                                    workbook = writer.book
+                                    worksheet = writer.sheets[name]
+                                    header_format = workbook.add_format({'bold': False, 'border': 0})
+                                    for col in data.columns:
+                                        if col in channels:
+                                            worksheet.write(0, channels.index(col), col, header_format)
+                        except Exception as error:
+                            raise error
+            else:
+                self.print_message('No raw data to export.')
+        if opts['Signal']:
+            if self.DRS.signal_data_raw:
+                # get selections and channels
+                channels = opts['Channels']
+                groups = opts['Groups']
+                if groups:
+                    selections = [selection for group in groups for selection in self.groups[group]]
+                else:
+                    selections = list(self.DRS.signal_data_raw.keys())
+                selections = get_log_name(self.handlelog.name_links,
+                                          selections,
+                                          self.handlelog.names_log)
+                # get the path to save
+                path = tk.filedialog.asksaveasfilename(title="Export Signal Data", filetypes=[('Excel file', '*.xlsx')])
+                # save data to excel
+                if path:
+                    if not os.path.splitext(os.path.basename(path))[1] == '.xlsx':
+                        path = path + '.xlsx'
+                    with pd.ExcelWriter(path) as writer:
+                        try:
+                            for name, data_sig in self.DRS.signal_data_raw.items():
+                                mean_bkg = self.DRS.background_data_raw[name].mean(axis=0)
+                                if not channels:
+                                    channels = data_sig.columns.to_list()
+                                name = get_log_name(self.handlelog.name_links,
+                                                    [name],
+                                                    self.handlelog.names_log)[0]
+                                if name in selections:
+                                    data_corr = data_sig[['Time [Sec]']].merge(data_sig[channels[1:]] - mean_bkg[channels[1:]], left_index=True, right_index=True, how='outer')
+                                    data_corr.to_excel(writer, sheet_name=name, index=False)
+                                    # applying style
+                                    workbook = writer.book
+                                    worksheet = writer.sheets[name]
+                                    header_format = workbook.add_format({'bold': False, 'border': 0})
+                                    for col in data_corr.columns:
+                                        if col in channels:
+                                            worksheet.write(0, channels.index(col), col, header_format)
+                        except Exception as error:
+                            raise error
 
     def populate_list_names(self):
         current_names = []
@@ -547,7 +629,7 @@ class MainWindow(QMainWindow):
             previousselected = get_unique_name(self.handlelog.name_links, self.previous_runselected)
             legend = self.ui.graphicsView.addLegend(offset=(-1, 1), labelTextColor='k')
             for i, run in enumerate(selected):
-                data = pd.concat([self.DRS.background_data[run], self.DRS.intermediate_data[run]], axis=0)
+                data = pd.concat([self.DRS.background_data_raw[run], self.DRS.intermediate_data[run]], axis=0)
                 for mass in self.mselected:
                     xdata = data.iloc[:, 0].to_list()
                     ydata = data.loc[:, mass].to_list()

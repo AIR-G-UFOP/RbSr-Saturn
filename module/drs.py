@@ -21,6 +21,7 @@ class DRS:
         self.intermediate_data = {}
         self.convertion_rate_data = None  # mean convertion rate of all files imported
         self.DF_data = None  # downhole fractionation of all files
+        self.background_uncertainty = {}
         self.results = None
 
     def get_limits(self, dict_initial, mass_index):
@@ -62,6 +63,7 @@ class DRS:
             self.background_data[name] = background_data_for_mean
             self.signal_data[name] = run_data_for_mean
             self.background_mean[name] = background_data_for_mean.mean()
+            self.background_uncertainty[name] = background_data_for_mean.std()
             self.signal_mean[name] = run_data_for_mean.mean()
 
     def background_subtraction(self):

@@ -6,7 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pandas.core.frame
+from pyqtgraph.examples.Flowchart import layout
+
 from ui.GroupDialog import Ui_GroupDialog
+from scipy.integrate import simpson
 
 from module.core import *
 
@@ -45,7 +48,7 @@ def open_grouped_data(path):
     return data
 
 
-def open_ungrouped_data(path):
+def open_ungrouped_data_ratios(path):
     excel = pd.ExcelFile(path)
     sheets = excel.sheet_names
 
@@ -77,6 +80,46 @@ def open_ungrouped_data(path):
 
     return raw_ratio
 
+def open_ungrouped_raw_data(path):
+    excel = pd.ExcelFile(path)
+    sheets = excel.sheet_names
+
+    groups = defaultdict(list)
+    for sheet in sheets:
+        match = re.match(r'([a-zA-Z0-9]+(?:_[a-zA-Z]+|-[a-zA-Z]+)?)(?:[-_]\d+)?', sheet)
+        if match:
+            key = match.group(1)
+            groups[key].append(sheet)
+    materials = dict(groups)
+
+    raw = {}
+    for name, sheet_names in materials.items():
+        data_dict = {sheet: pd.read_excel(excel, sheet_name=sheet, header=0) for sheet in sheet_names}
+        time = max(data_dict.keys(), key=lambda s: len(data_dict[s]['Time [Sec]'].dropna()))
+
+        Rb85 = data_dict[time][['Time [Sec]']].copy()
+        Sr86 = data_dict[time][['Time [Sec]']].copy()
+        Sr87 = data_dict[time][['Time [Sec]']].copy()
+        Sr107 = data_dict[time][['Time [Sec]']].copy()
+
+        cont = 1
+        for sheet, data in data_dict.items():
+            data_i = data.drop(columns=['Time [Sec]'], errors='ignore')
+            for col in data_i.columns:
+                data_m = data_i.loc[:, col]
+                data_m.rename(col + '-' + str(cont), inplace=True)
+                if col == 'Rb85':
+                    Rb85 = Rb85.merge(data_m, left_index=True, right_index=True, how='outer')
+                elif col == 'Sr105':
+                    Sr86 = Sr86.merge(data_m, left_index=True, right_index=True, how='outer')
+                elif col == 'Sr106':
+                    Sr87 = Sr87.merge(data_m, left_index=True, right_index=True, how='outer')
+                elif col == 'Sr107':
+                    Sr107 = Sr107.merge(data_m, left_index=True, right_index=True, how='outer')
+            cont += 1
+        raw[name] = {'Rb85': Rb85, 'Sr105': Sr86, 'Sr106': Sr87, 'Sr107': Sr107}
+    return raw
+
 
 def plot_patterns():
     fig, axes = plt.subplots(nrows=5, ncols=2, layout='constrained')
@@ -102,6 +145,115 @@ def plot_patterns():
     plt.show()
 
 
+def plot_raw_data():
+    # settings
+    colours = ['#000000', '#9E9B99', '#66CCEE', '#FFC20A', '#0C7BDC', '#E66100', '#5D3A9B', '#D41159', '#D35FB7',
+               '#1AFF1A']
+    RM = ['LaPosta_V', 'LaPosta_H', 'MD4B_V', 'MD4B_H', 'HogsboM_V', 'HogsboM_H', 'BRM1_V', 'BRM1_H', 'BRM2_V', 'BRM2_H']
+    # get data file paths
+    dir_path = r'raw_signal_crystallographic_comparison'
+    file_pathern = os.path.join(dir_path, '*.xlsx')
+    data_files = glob.glob(file_pathern)
+    # create canvas
+    # fig, axes = plt.subplots(nrows=5, ncols=2, layout='constrained')
+    # axes = axes.flatten()
+    # open and sort data files
+    data_perc_diff = {}
+    for i, file in enumerate(data_files):
+        file_name = os.path.splitext(os.path.basename(file))[0]
+        print(file_name)
+        raw_data = open_ungrouped_raw_data(file)
+        # plot data
+        # mass = 'Sr107'
+        perc_diff_mass = {}
+        for mass in ['Rb85', 'Sr105', 'Sr106', 'Sr107']:
+            data_mean = {}
+            for name, data in raw_data.items():
+                row = RM.index(name)
+                data_m = data[mass]
+                mean_data_m = data_m.iloc[:, 1:].mean(axis=1)
+                time = data_m.iloc[:, 0]
+                data_mean[name] = pd.concat([time, mean_data_m], axis=1)
+                # plot all data
+                # axes[row].plot(time, data_m, label=file_name, color=colours[i])
+                # axes[row].set_title(name)
+
+                # plot data mean
+                # axes[row].plot(time, mean_data_m, label=file_name, color=colours[i])
+                # axes[row].set_title(name)
+                # axes[row].legend(ncol=2, loc='upper right', fontsize=8, columnspacing=0.5)
+                #
+                # axes[row].set_xlabel('Ablation time (s)')
+                # axes[row].set_ylabel(mass + '(cps)')
+            perc_diff_mass[mass] = calculate_percentage_difference_raw_signal(data_mean)
+        data_perc_diff[file_name] = perc_diff_mass
+    data_perc_diff = {outer: pd.DataFrame(inner_dict) for outer, inner_dict in data_perc_diff.items()}
+    plot_percentage_difference(data_perc_diff)
+    # with pd.ExcelWriter('percentage_difference_all_data.xlsx') as writer:
+    #     for sheet_name, data_diff in data_perc_diff.items():
+    #         data_diff.to_excel(writer, sheet_name=sheet_name)
+    # plt.show()
+    # handles0, labels0 = axes[0].get_legend_handles_labels()
+    # handles1, labels1 = axes[7].get_legend_handles_labels()
+    # handles = handles0 + handles1
+    # labels = labels0 + labels1
+    # legend_fig = plt.figure(figsize=(2, 1))
+    # legend_fig.legend(handles, labels, loc='center')
+    # legend_fig.savefig('legend_mean_average_signals_all_data.pdf', bbox_inches='tight')
+    # plt.close(legend_fig)
+
+def calculate_percentage_difference_raw_signal(data):
+    materials = {'LaPosta': ['LaPosta_V', 'LaPosta_H'],
+                 'MD4B': ['MD4B_V', 'MD4B_H'],
+                 'HogsboM': ['HogsboM_V', 'HogsboM_H'],
+                 'BRM1': ['BRM1_V', 'BRM1_H'],
+                 'BRM2': ['BRM2_V', 'BRM2_H']}
+    data_diff = {}
+    for mat, orient in materials.items():
+        try:
+            vert = orient[0]
+            horiz = orient[1]
+            if vert in data.keys():
+                data_a = data[vert]   # data vertical orientation
+                data_b = data[horiz]   # data horizontal orientation
+                auc_a = simpson(data_a.iloc[:, 1], data_a.iloc[:, 0], ) # area under the curve, vertical
+                auc_b = simpson(data_b.iloc[:, 1], data_b.iloc[:, 0], ) # area under the curve, horizontal
+                # percentage difference
+                data_diff[mat] = round((auc_b - auc_a) / ((auc_a + auc_b) / 2) * 100, 2)
+        except Exception as error:
+            raise error
+    return data_diff
+
+def plot_percentage_difference(data):
+    palette = ['#000000', '#9E9B99', '#66CCEE', '#FFC20A', '#0C7BDC', '#E66100', '#5D3A9B', '#D41159', '#D35FB7',
+               '#1AFF1A']
+    RM = ['LaPosta', 'MD4B', 'HogsboM', 'BRM1', 'BRM2']
+    all_data = pd.concat( {batch: df for batch, df in data.items()}, names=['Session', 'Material']).reset_index()
+    all_data = all_data[~((all_data['Session'] == '20250224_batch1') & (all_data['Material'] == 'LaPosta'))]
+    all_data = all_data.melt(id_vars=['Session', 'Material'], var_name='Masses', value_name='Percent_diff')
+    materials = sorted(all_data['Material'].unique())
+    elements = sorted(all_data['Masses'].unique())
+    nrows, ncols = len(materials), len(elements)
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4 * ncols, 3.5 * nrows), sharey='row')
+    axes = axes.reshape(nrows, ncols)
+    sns.set_theme(style='whitegrid')
+    sns.set_context('talk', font_scale=0.9)
+    for i, material in enumerate(RM):
+        for j, mass in enumerate(['Rb85', 'Sr105', 'Sr106', 'Sr107']):
+            ax = axes[i, j]
+            sub = all_data[(all_data['Material'] == material) & (all_data['Masses'] == mass)]
+            sns.barplot(data=sub, x='Session', y='Percent_diff', hue='Session', dodge=False, palette=palette, ax=ax,
+                        edgecolor='black')
+            ax.axhline(0, color='gray', linestyle='--', linewidth=1)
+            ax.set_title(f'{material} – {mass}', fontsize=11, pad=10)
+            ax.set_xlabel('')
+            ax.set_ylabel('% diff (H – V)' if j == 0 else '', fontsize=10)
+            ax.legend().remove()
+            ax.set_xticks([])  # Remove x-tick labels
+            sns.despine(ax=ax)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+
 def plot_DF_all_data():
     colours = ['#000000', '#9E9B99', '#66CCEE', '#FFC20A', '#0C7BDC', '#E66100', '#5D3A9B', '#D41159', '#D35FB7', '#1AFF1A', '#994f00', '#FF0000']
     RM = ['LaPosta_V', 'LaPosta_H', '610', 'MD4B_V', 'MD4B_H', 'MicaMg', 'Hogsbo_V', 'Hogsbo_H'] #, 'MicaFe', 'WP1_V', 'WP1_H']
@@ -120,7 +272,7 @@ def plot_DF_all_data():
         if file_name == '20250203-UoP' or file_name == '20260626_UoP_Batch3':
             raw_data = open_grouped_data(file)
         else:
-            raw_data = open_ungrouped_data(file)
+            raw_data = open_ungrouped_data_ratios(file)
         DF_data, DFI_data = df_patterns_calc(raw_data)
         DFI[file_name] = DFI_data
         for name, data in DF_data.items():
@@ -484,6 +636,6 @@ class Window(QDialog):
 #     window.show()
 #     sys.exit(app.exec_())
 
-plot_DF_all_data()
+plot_raw_data()
 
 
