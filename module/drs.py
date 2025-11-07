@@ -12,6 +12,7 @@ class DRS:
 
         self.line_index = None
         self.limits = {}
+        self.crop_time = {}
         self.signal_data_raw = {}  # signal sweeps of all files imported
         self.signal_data = {}  # signal sweeps of all files imported
         self.background_data_raw = {}  # background sweeps of all files imported
@@ -48,6 +49,9 @@ class DRS:
             background_data = data.iloc[:self.line_index]
             run_data = data.iloc[self.line_index:]
             self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]
+            self.crop_time[name] = [round(min_bkg, 1), round(min_bkg, 1),
+                                    round(min_sig - data.iloc[self.line_index, 0], 1),
+                                    round(min_sig - data.iloc[self.line_index, 0], 1)]
             self.background_data_raw[name] = background_data
             self.signal_data_raw[name] = run_data
 
@@ -110,7 +114,7 @@ class DRS:
             M2 = half_2.mean()
             df = (M2 - M1) / M * 100
             DF[name] = df
-            data['Rb87/Sr86_DF'] = data['Rb87/Sr86_raw'] / M['Rb87/Sr86_raw']
+            data['Rb87/Sr86_DFindex'] = data['Rb87/Sr86_raw'] / M['Rb87/Sr86_raw']
             self.intermediate_data[name] = data
         self.DF_data = pd.DataFrame.from_dict(DF, orient='index').sort_index()
 

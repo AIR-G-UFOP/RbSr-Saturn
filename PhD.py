@@ -6,37 +6,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pandas.core.frame
-from pyqtgraph.examples.Flowchart import layout
 
 from ui.GroupDialog import Ui_GroupDialog
 from scipy.integrate import simpson
+import statistics
 
 from module.core import *
 
 
-def df_patterns_calc(data):
-    DF_data = {}
-    DFI_data = {}
-    for name, data_i in data.items():
-        time = data_i['Elapsed Time']
-
-        data_i.drop('Elapsed Time', axis=1, inplace=True)
-        data_i.mask(data_i < 0, np.nan, inplace=True)
-        mid = len(data_i) // 2
-
-        average = data_i.mean()
-        DF = data_i / average
-
-        DF1 = data_i.iloc[:mid].mean()
-        DF2 = data_i.iloc[mid:].mean()
-        DFI = ((DF2 - DF1) / average) * 100
-
-        DF_data[name] = pd.concat([time, DF], axis=1)
-        DFI_data[name] = DFI.mean()
-
-    return DF_data, DFI_data
-
-
+# Utils ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 def open_grouped_data(path):
     excel = pd.ExcelFile(path)
     material = excel.sheet_names
@@ -46,7 +24,6 @@ def open_grouped_data(path):
         data[name] = pd.read_excel(path, sheet_name=name)
 
     return data
-
 
 def open_ungrouped_data_ratios(path):
     excel = pd.ExcelFile(path)
@@ -83,7 +60,10 @@ def open_ungrouped_data_ratios(path):
 def open_ungrouped_raw_data(path):
     excel = pd.ExcelFile(path)
     sheets = excel.sheet_names
-
+    header = 1  # 0 for raw data, 1 for selected data
+    cols = ['Rb85_Sr86s_Raw', 'Sr87s_Sr86s_Raw'] # ['Rb85_CPS', 'Sr86_CPS','Sr87_CPS','Sr107_CPS'], ['Rb85', 'Sr105', 'Sr106', 'Sr107']
+    time_col = 'Elapsed Time' # 'Time [Sec]' for raw data
+    drop_col =  ['Absolute Time', time_col] # [time_col] for selected data
     groups = defaultdict(list)
     for sheet in sheets:
         match = re.match(r'([a-zA-Z0-9]+(?:_[a-zA-Z]+|-[a-zA-Z]+)?)(?:[-_]\d+)?', sheet)
@@ -94,274 +74,38 @@ def open_ungrouped_raw_data(path):
 
     raw = {}
     for name, sheet_names in materials.items():
-        data_dict = {sheet: pd.read_excel(excel, sheet_name=sheet, header=0) for sheet in sheet_names}
-        time = max(data_dict.keys(), key=lambda s: len(data_dict[s]['Time [Sec]'].dropna()))
+        data_dict = {sheet: pd.read_excel(excel, sheet_name=sheet, header=header) for sheet in sheet_names}
+        time = max(data_dict.keys(), key=lambda s: len(data_dict[s][time_col].dropna()))
 
-        Rb85 = data_dict[time][['Time [Sec]']].copy()
-        Sr86 = data_dict[time][['Time [Sec]']].copy()
-        Sr87 = data_dict[time][['Time [Sec]']].copy()
-        Sr107 = data_dict[time][['Time [Sec]']].copy()
+        # Rb85 = data_dict[time][[time_col]].copy()
+        # Sr86 = data_dict[time][[time_col]].copy()
+        # Sr87 = data_dict[time][[time_col]].copy()
+        # Sr107 = data_dict[time][[time_col]].copy()
+        rbsr = data_dict[time][[time_col]].copy()
+        srsr = data_dict[time][[time_col]].copy()
 
         cont = 1
         for sheet, data in data_dict.items():
-            data_i = data.drop(columns=['Time [Sec]'], errors='ignore')
-            for col in data_i.columns:
+            data_i = data.drop(columns=drop_col, errors='ignore')
+            for col in cols:
                 data_m = data_i.loc[:, col]
                 data_m.rename(col + '-' + str(cont), inplace=True)
-                if col == 'Rb85':
-                    Rb85 = Rb85.merge(data_m, left_index=True, right_index=True, how='outer')
-                elif col == 'Sr105':
-                    Sr86 = Sr86.merge(data_m, left_index=True, right_index=True, how='outer')
-                elif col == 'Sr106':
-                    Sr87 = Sr87.merge(data_m, left_index=True, right_index=True, how='outer')
-                elif col == 'Sr107':
-                    Sr107 = Sr107.merge(data_m, left_index=True, right_index=True, how='outer')
+                # if col == 'Rb85':
+                #     Rb85 = Rb85.merge(data_m, left_index=True, right_index=True, how='outer')
+                # elif col == 'Sr105':
+                #     Sr86 = Sr86.merge(data_m, left_index=True, right_index=True, how='outer')
+                # elif col == 'Sr106':
+                #     Sr87 = Sr87.merge(data_m, left_index=True, right_index=True, how='outer')
+                # elif col == 'Sr107':
+                #     Sr107 = Sr107.merge(data_m, left_index=True, right_index=True, how='outer')
+                if col == 'Rb85_Sr86s_Raw':
+                    rbsr = rbsr.merge(data_m, left_index=True, right_index=True, how='outer')
+                elif col == 'Sr87s_Sr86s_Raw':
+                    srsr = srsr.merge(data_m, left_index=True, right_index=True, how='outer')
             cont += 1
-        raw[name] = {'Rb85': Rb85, 'Sr105': Sr86, 'Sr106': Sr87, 'Sr107': Sr107}
+        # raw[name] = {'Rb85': Rb85, 'Sr105': Sr86, 'Sr106': Sr87, 'Sr107': Sr107}
+        raw[name] = {'Rb/Sr': rbsr, 'Sr/Sr': srsr}
     return raw
-
-
-def plot_patterns():
-    fig, axes = plt.subplots(nrows=5, ncols=2, layout='constrained')
-    axes = axes.flatten()
-    row = ['MicaMg', '610', 'MD4B_V', 'MD4B_H', 'LaPosta_V', 'LaPosta_H', 'HogsboM_V', 'HogsboM_H', 'WP1_V', 'WP1_H']
-
-    raw_ratio = open_ungrouped_data('20260626_OU_Batch3_Raw_Ratios.xlsx')
-    df_data, df_index = df_patterns_calc(raw_ratio)
-    for name, data_i in df_data.items():
-        time = data_i.iloc[:, 0]
-        values = data_i.iloc[:, 1:].mean(axis=1)
-        # values_average = values.mean(axis=1)
-        row_i = row.index(name)
-        axes[row_i].plot(time, values)
-        axes[row_i].plot(time, values, 'k')
-        axes[row_i].set_title(name)
-        axes[row_i].set_ylim(0.5, 1.5)
-
-    with pd.ExcelWriter('DF_indexfentosecond.xlsx', engine='xlsxwriter') as writer:
-        DF = pd.DataFrame.from_dict(df_index, orient='index')
-        DF.to_excel(writer, index=True)
-
-    plt.show()
-
-
-def plot_raw_data():
-    # settings
-    colours = ['#000000', '#9E9B99', '#66CCEE', '#FFC20A', '#0C7BDC', '#E66100', '#5D3A9B', '#D41159', '#D35FB7',
-               '#1AFF1A']
-    RM = ['LaPosta_V', 'LaPosta_H', 'MD4B_V', 'MD4B_H', 'HogsboM_V', 'HogsboM_H', 'BRM1_V', 'BRM1_H', 'BRM2_V', 'BRM2_H']
-    # get data file paths
-    dir_path = r'raw_signal_crystallographic_comparison'
-    file_pathern = os.path.join(dir_path, '*.xlsx')
-    data_files = glob.glob(file_pathern)
-    # create canvas
-    # fig, axes = plt.subplots(nrows=5, ncols=2, layout='constrained')
-    # axes = axes.flatten()
-    # open and sort data files
-    data_perc_diff = {}
-    for i, file in enumerate(data_files):
-        file_name = os.path.splitext(os.path.basename(file))[0]
-        print(file_name)
-        raw_data = open_ungrouped_raw_data(file)
-        # plot data
-        # mass = 'Sr107'
-        perc_diff_mass = {}
-        for mass in ['Rb85', 'Sr105', 'Sr106', 'Sr107']:
-            data_mean = {}
-            for name, data in raw_data.items():
-                row = RM.index(name)
-                data_m = data[mass]
-                mean_data_m = data_m.iloc[:, 1:].mean(axis=1)
-                time = data_m.iloc[:, 0]
-                data_mean[name] = pd.concat([time, mean_data_m], axis=1)
-                # plot all data
-                # axes[row].plot(time, data_m, label=file_name, color=colours[i])
-                # axes[row].set_title(name)
-
-                # plot data mean
-                # axes[row].plot(time, mean_data_m, label=file_name, color=colours[i])
-                # axes[row].set_title(name)
-                # axes[row].legend(ncol=2, loc='upper right', fontsize=8, columnspacing=0.5)
-                #
-                # axes[row].set_xlabel('Ablation time (s)')
-                # axes[row].set_ylabel(mass + '(cps)')
-            perc_diff_mass[mass] = calculate_percentage_difference_raw_signal(data_mean)
-        data_perc_diff[file_name] = perc_diff_mass
-    data_perc_diff = {outer: pd.DataFrame(inner_dict) for outer, inner_dict in data_perc_diff.items()}
-    plot_percentage_difference(data_perc_diff)
-    # with pd.ExcelWriter('percentage_difference_all_data.xlsx') as writer:
-    #     for sheet_name, data_diff in data_perc_diff.items():
-    #         data_diff.to_excel(writer, sheet_name=sheet_name)
-    # plt.show()
-    # handles0, labels0 = axes[0].get_legend_handles_labels()
-    # handles1, labels1 = axes[7].get_legend_handles_labels()
-    # handles = handles0 + handles1
-    # labels = labels0 + labels1
-    # legend_fig = plt.figure(figsize=(2, 1))
-    # legend_fig.legend(handles, labels, loc='center')
-    # legend_fig.savefig('legend_mean_average_signals_all_data.pdf', bbox_inches='tight')
-    # plt.close(legend_fig)
-
-def calculate_percentage_difference_raw_signal(data):
-    materials = {'LaPosta': ['LaPosta_V', 'LaPosta_H'],
-                 'MD4B': ['MD4B_V', 'MD4B_H'],
-                 'HogsboM': ['HogsboM_V', 'HogsboM_H'],
-                 'BRM1': ['BRM1_V', 'BRM1_H'],
-                 'BRM2': ['BRM2_V', 'BRM2_H']}
-    data_diff = {}
-    for mat, orient in materials.items():
-        try:
-            vert = orient[0]
-            horiz = orient[1]
-            if vert in data.keys():
-                data_a = data[vert]   # data vertical orientation
-                data_b = data[horiz]   # data horizontal orientation
-                auc_a = simpson(data_a.iloc[:, 1], data_a.iloc[:, 0], ) # area under the curve, vertical
-                auc_b = simpson(data_b.iloc[:, 1], data_b.iloc[:, 0], ) # area under the curve, horizontal
-                # percentage difference
-                data_diff[mat] = round((auc_b - auc_a) / ((auc_a + auc_b) / 2) * 100, 2)
-        except Exception as error:
-            raise error
-    return data_diff
-
-def plot_percentage_difference(data):
-    palette = ['#000000', '#9E9B99', '#66CCEE', '#FFC20A', '#0C7BDC', '#E66100', '#5D3A9B', '#D41159', '#D35FB7',
-               '#1AFF1A']
-    RM = ['LaPosta', 'MD4B', 'HogsboM', 'BRM1', 'BRM2']
-    all_data = pd.concat( {batch: df for batch, df in data.items()}, names=['Session', 'Material']).reset_index()
-    all_data = all_data[~((all_data['Session'] == '20250224_batch1') & (all_data['Material'] == 'LaPosta'))]
-    all_data = all_data.melt(id_vars=['Session', 'Material'], var_name='Masses', value_name='Percent_diff')
-    materials = sorted(all_data['Material'].unique())
-    elements = sorted(all_data['Masses'].unique())
-    nrows, ncols = len(materials), len(elements)
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4 * ncols, 3.5 * nrows), sharey='row')
-    axes = axes.reshape(nrows, ncols)
-    sns.set_theme(style='whitegrid')
-    sns.set_context('talk', font_scale=0.9)
-    for i, material in enumerate(RM):
-        for j, mass in enumerate(['Rb85', 'Sr105', 'Sr106', 'Sr107']):
-            ax = axes[i, j]
-            sub = all_data[(all_data['Material'] == material) & (all_data['Masses'] == mass)]
-            sns.barplot(data=sub, x='Session', y='Percent_diff', hue='Session', dodge=False, palette=palette, ax=ax,
-                        edgecolor='black')
-            ax.axhline(0, color='gray', linestyle='--', linewidth=1)
-            ax.set_title(f'{material} – {mass}', fontsize=11, pad=10)
-            ax.set_xlabel('')
-            ax.set_ylabel('% diff (H – V)' if j == 0 else '', fontsize=10)
-            ax.legend().remove()
-            ax.set_xticks([])  # Remove x-tick labels
-            sns.despine(ax=ax)
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.show()
-
-def plot_DF_all_data():
-    colours = ['#000000', '#9E9B99', '#66CCEE', '#FFC20A', '#0C7BDC', '#E66100', '#5D3A9B', '#D41159', '#D35FB7', '#1AFF1A', '#994f00', '#FF0000']
-    RM = ['LaPosta_V', 'LaPosta_H', '610', 'MD4B_V', 'MD4B_H', 'MicaMg', 'Hogsbo_V', 'Hogsbo_H'] #, 'MicaFe', 'WP1_V', 'WP1_H']
-    DFI = {}
-    all_data = {name: [] for name in RM}
-    data_each_run = {name: {} for name in RM}
-
-    dir_path = r'data'
-    file_pathern = os.path.join(dir_path, '*.xlsx')
-    data_files = glob.glob(file_pathern)
-
-    fig, axes = plt.subplots(nrows=3, ncols=3, layout='constrained')
-    axes = axes.flatten()
-    for i, file in enumerate(data_files):
-        file_name = os.path.splitext(os.path.basename(file))[0]
-        if file_name == '20250203-UoP' or file_name == '20260626_UoP_Batch3':
-            raw_data = open_grouped_data(file)
-        else:
-            raw_data = open_ungrouped_data_ratios(file)
-        DF_data, DFI_data = df_patterns_calc(raw_data)
-        DFI[file_name] = DFI_data
-        for name, data in DF_data.items():
-            if name != 'WP1_V' and name != 'WP1_H' and name != 'MicaFe':
-                row = RM.index(name)
-                time = data.iloc[:, 0]
-                norm_data = data.iloc[:, 1:].mean(axis=1)
-
-                run_data_and_mean = pd.concat([data, norm_data.mean(axis=1).rename('mean')], axis=1)
-                material = data_each_run[name+'-'+file_name]
-                material[file_name] = run_data_and_mean
-
-                list = all_data[name+'-'+file_name]
-                list.append(pd.DataFrame(data=norm_data.values, index=time.values))
-
-                axes[row].plot(time, norm_data, label=name, color=colours[i])
-                # axes[row].plot(time, norm_data.mean(axis=1), color='black')
-                axes[row].set_title(name)
-                axes[row].set_ylim(0.5, 1.5)
-                # axes[row].legend(ncol=2, loc='upper right', fontsize=8, columnspacing=0.5)
-
-                axes[row].set_xlabel('Ablation time (s)')
-                axes[row].set_ylabel('Norm Rb/Sr')
-
-    from statsmodels.nonparametric.smoothers_lowess import lowess
-    all_data_mean = {}
-    for name, list in all_data.items():
-        try:
-            all_times = [df.index.to_numpy() for df in list]
-            all_times = np.unique(np.concatenate(all_times))
-            common_times = np.linspace(all_times.min(), all_times.max(), 200)
-
-            interpolated_dfs = []
-            for df in list:
-                # Ensure sorted index and numeric
-                df = df.sort_index()
-                df.index = df.index.astype(float)
-
-                # Interpolate to make time a continuous function
-                df_interp = df.interpolate(method='index', limit_direction='both')
-
-                # Now use numpy.interp for each column to ensure smooth interpolation
-                df_uniform = pd.DataFrame(index=common_times)
-
-                for col in df.columns:
-                    # Drop NaNs to avoid crashing interp
-                    valid = df_interp[col].dropna()
-                    if len(valid) < 2:
-                        # Not enough points to interpolate — skip or fill
-                        df_uniform[col] = np.nan
-                    else:
-                        df_uniform[col] = np.interp(common_times, valid.index, valid.values)
-
-                interpolated_dfs.append(df_uniform)
-
-            # Combine and average (ignoring NaNs)
-            combined = pd.concat(interpolated_dfs)
-            mean_df = combined.groupby(combined.index).mean()
-            all_data_mean[name] = mean_df
-            std_df = combined.groupby(combined.index).std()
-            n = combined.groupby(combined.index).count()
-            x = mean_df.index.to_numpy()
-            y = mean_df.iloc[:, 0].to_numpy()
-            lowess_r = np.array(lowess(endog=y, exog=x, frac=0.15, return_sorted=False))
-            stderr = (std_df.iloc[:, 0] / np.sqrt(n.iloc[:, 0])).to_numpy()
-            upper = lowess_r + 1.96 * stderr
-            lower = lowess_r - 1.96 * stderr
-
-            axes[RM.index(name)].plot(x, lowess_r, 'black', label=name+'_LOWESS')
-            axes[RM.index(name)].fill_between(x, lower, upper, color='black', alpha=0.1, label='95% Envelope')
-        except ValueError:
-            pass
-
-    # with pd.ExcelWriter('DF_index_spot_sizes_test.xlsx', engine='xlsxwriter') as writer:
-    #     for sheet_name, d in DFI.items():
-    #         DF = pd.DataFrame.from_dict(d, orient='index')
-    #         DF.to_excel(writer, sheet_name=sheet_name, index=True)
-    #
-    # for name, run in data_each_run.items():
-    #     with pd.ExcelWriter(name + '_DF_patterns_and_mean.xlsx', engine='xlsxwriter') as writer:
-    #         for sheet_name, data in run.items():
-    #             data.to_excel(writer, sheet_name=sheet_name, index=False)
-    #
-    # with pd.ExcelWriter('DF_all_data_mean.xlsx', engine='xlsxwriter') as writer:
-    #     for name, data in all_data_mean.items():
-    #         data.to_excel(writer, sheet_name=name, index=True)
-
-    plt.show()
-
 
 def group_excel_files():
     dir_path = r'C:\Users\if2375\OneDrive - The Open University\LA-ICP-MS lab data\Statistics'
@@ -415,7 +159,6 @@ def group_excel_files():
         IntPrecis.to_excel(writer, sheet_name='InterPrecis')
         IntReprod.to_excel(writer, sheet_name='InterReprod')
 
-
 def open_pdf():
     import pdfplumber
 
@@ -444,7 +187,490 @@ def open_pdf():
 
     with pd.ExcelWriter('Lenses_log.xlsx', engine='xlsxwriter') as writer:
         final_log.to_excel(writer, index=True)
+# /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+# Plot raw signal /////////////////////////////////////////////////////////////////////////////////////////////////////
+def plot_raw_data():
+    # settings
+    colours = ['#000000', '#9E9B99', '#66CCEE', '#FFC20A', '#0C7BDC', '#E66100', '#5D3A9B', '#D41159', '#D35FB7',
+               '#1AFF1A']
+    RM = ['LaPosta_V', 'LaPosta_H', 'MD4B_V', 'MD4B_H', 'HogsboM_V', 'HogsboM_H', 'BRM1_V', 'BRM1_H', 'BRM2_V', 'BRM2_H']
+    # get data file paths
+    dir_path = r'raw_signal_crystallographic_comparison'
+    file_pathern = os.path.join(dir_path, '*.xlsx')
+    data_files = glob.glob(file_pathern)
+    # create canvas
+    fig, axes = plt.subplots(nrows=5, ncols=2, layout='constrained')
+    axes = axes.flatten()
+    # open and sort data files
+    for i, file in enumerate(data_files):
+        file_name = os.path.splitext(os.path.basename(file))[0]
+        print(file_name)
+        raw_data = open_ungrouped_raw_data(file)
+        # plot data
+        mass = 'Sr107'
+        for name, data in raw_data.items():
+            data_m = data[mass]
+            row = RM.index(name)
+            mean_data_m = data_m.iloc[:, 1:].mean(axis=1)
+            time = data_m.iloc[:, 0]
+            # plot all data
+            axes[row].plot(time, data_m, label=file_name, color=colours[i])
+            axes[row].set_title(name)
+            # plot data mean
+            # axes[row].plot(time, mean_data_m, label=file_name, color=colours[i])
+            # axes[row].set_title(name)
+            # axes[row].legend(ncol=2, loc='upper right', fontsize=8, columnspacing=0.5)
+            # Plot settings
+            axes[row].set_xlabel('Ablation time (s)')
+            axes[row].set_ylabel(mass + '(cps)')
+    plt.show()
+    # plot legend only
+    # handles0, labels0 = axes[0].get_legend_handles_labels()
+    # handles1, labels1 = axes[7].get_legend_handles_labels()
+    # handles = handles0 + handles1
+    # labels = labels0 + labels1
+    # legend_fig = plt.figure(figsize=(2, 1))
+    # legend_fig.legend(handles, labels, loc='center')
+    # legend_fig.savefig('legend_mean_average_signals_all_data.pdf', bbox_inches='tight')
+    # plt.close(legend_fig)
+# /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+# Percentage difference horizontal vs vertical ////////////////////////////////////////////////////////////////////////
+def percentage_difference_raw_signal():
+    # get data file paths
+    dir_path = r'selected_signal_crystallographic_comparison'
+    file_pathern = os.path.join(dir_path, '*.xlsx')
+    data_files = glob.glob(file_pathern)
+    # open and sort data files
+    data_perc_diff = {}
+    for i, file in enumerate(data_files):
+        file_name = os.path.splitext(os.path.basename(file))[0]
+        print(file_name)
+        raw_data = open_ungrouped_raw_data(file)
+        perc_diff_mass = {}
+        for mass in ['Rb85', 'Sr105', 'Sr106', 'Sr107']:
+            data_mean = {}
+            for name, data in raw_data.items():
+                data_m = data[mass]
+                mean_data_m = data_m.iloc[:, 1:].mean(axis=1)
+                time = data_m.iloc[:, 0]
+                data_mean[name] = pd.concat([time, mean_data_m], axis=1)
+            perc_diff_mass[mass] = calculate_percentage_difference_raw_signal(data_mean)
+        data_perc_diff[file_name] = perc_diff_mass
+    data_perc_diff = {outer: pd.DataFrame(inner_dict) for outer, inner_dict in data_perc_diff.items()}
+    data_perc_diff = pd.concat({batch: df for batch, df in data_perc_diff.items()}, names=['Session', 'Material']).reset_index()
+    data_perc_diff = data_perc_diff.melt(id_vars=['Session', 'Material'], var_name='Masses', value_name='Percent_diff')
+    plot_percentage_difference(data_perc_diff)
+    with pd.ExcelWriter('perc_diff_selected_data.xlsx') as writer:
+        data_perc_diff.to_excel(writer)
+
+def calculate_percentage_difference_raw_signal(data):
+    materials = {'LaPosta': ['LaPosta_V', 'LaPosta_H'],
+                 'MD4B': ['MD4B_V', 'MD4B_H'],
+                 'HogsboM': ['HogsboM_V', 'HogsboM_H'],
+                 'BRM1': ['BRM1_V', 'BRM1_H'],
+                 'BRM2': ['BRM2_V', 'BRM2_H']}
+    data_diff = {}
+    for mat, orient in materials.items():
+        try:
+            vert = orient[0]
+            horiz = orient[1]
+            if horiz in data.keys():
+                data_a = data[vert].dropna()  # data vertical orientation
+                data_b = data[horiz].dropna()   # data horizontal orientation
+                auc_a = simpson(data_a.iloc[:, 1], data_a.iloc[:, 0], ) # area under the curve, vertical
+                auc_b = simpson(data_b.iloc[:, 1], data_b.iloc[:, 0], ) # area under the curve, horizontal
+                # percentage difference
+                data_diff[mat] = round((auc_b - auc_a) / ((auc_a + auc_b) / 2) * 100, 2)
+        except Exception as error:
+            raise error
+    return data_diff
+
+def plot_percentage_difference(data):
+    palette = {'20241213_batch1': '#000000', '20241213_batch2': '#9E9B99', '20250218_batch2': '#66CCEE',
+               '20250218_batch3': '#FFC20A', '20250224_batch1': '#0C7BDC', '20250224_batch2': '#E66100',
+               '20250227_batch1': '#5D3A9B', '20251016_batch2': '#D41159', '20251020_batch1': '#D35FB7',
+               '20251020_batch2': '#1AFF1A'}
+    RM = ['LaPosta', 'MD4B', 'HogsboM', 'BRM1', 'BRM2']
+    materials = sorted(data['Material'].unique())
+    elements = sorted(data['Masses'].unique())
+    nrows, ncols = len(materials), len(elements)
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4 * ncols, 3.5 * nrows), sharey='row')
+    axes = axes.reshape(nrows, ncols)
+    sns.set_theme(style='whitegrid')
+    sns.set_context('talk', font_scale=0.9)
+    for i, material in enumerate(RM):
+        for j, mass in enumerate(['Rb85', 'Sr105', 'Sr106', 'Sr107']):
+            ax = axes[i, j]
+            sub = data[(data['Material'] == material) & (data['Masses'] == mass)]
+            sns.barplot(data=sub, x='Session', y='Percent_diff', hue='Session', dodge=False, palette=palette, ax=ax,
+                        edgecolor='black')
+            ax.axhline(0, color='gray', linestyle='--', linewidth=1)
+            ax.set_title(f'{material} – {mass}', fontsize=11, pad=10)
+            ax.set_xlabel('')
+            ax.set_ylabel('% diff (H – V)' if j == 0 else '', fontsize=10)
+            ax.legend().remove()
+            ax.set_xticks([])  # Remove x-tick labels
+            sns.despine(ax=ax)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+# /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+# Internal precision for raw signal ///////////////////////////////////////////////////////////////////////////////////
+def internal_precision_raw_signal():
+    # get data file paths
+    dir_path = r'selected_signal_crystallographic_comparison'
+    file_pathern = os.path.join(dir_path, '*.xlsx')
+    data_files = glob.glob(file_pathern)
+    # open and sort data files
+    int_prec = {}
+    for i, file in enumerate(data_files):
+        file_name = os.path.splitext(os.path.basename(file))[0]
+        print(file_name)
+        raw_data = open_ungrouped_raw_data(file)
+        int_prec_mass = {}
+        for mass in ['Rb85', 'Sr105', 'Sr106', 'Sr107']:
+            int_prec_mat = {}
+            for name, data in raw_data.items():
+                data_m = data[mass]
+                int_prec_mat[name] = calculate_internal_precision_raw_data(data_m)
+            int_prec_mass[mass] = int_prec_mat
+        int_prec[file_name] = int_prec_mass
+    to_export = []
+    for session, masses in int_prec.items():
+        for mass, materials in masses.items():
+            for material, values in materials.items():
+                to_export.append({'Session': session,
+                                  'Material': material,
+                                  'Mass': mass,
+                                  '2s%': values[0],
+                                  'std': values[1]})
+    with pd.ExcelWriter('int_prec_selected_signal.xlsx') as writer:
+        pd.DataFrame(to_export).to_excel(writer)
+
+def calculate_internal_precision_raw_data(data):
+    result = []
+    for spot in data.columns.to_list()[1:]:
+        spot_data = data.loc[:, spot]
+        x = spot_data.mean()
+        sig = spot_data.std()
+        n = len(spot_data.index)
+        result.append(2 * (sig / np.sqrt(n)) * (1 / x) * 100)
+    return [statistics.mean(result), statistics.stdev(result)]
+# /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+# Down-hole fractionation patterns ////////////////////////////////////////////////////////////////////////////////////
+def df_patterns_calc_all_data(data):
+    df_data = {}
+    df_index_data = {}
+    ratios_data = {}
+    for name, ratios in data.items():
+        time = ratios['Rb85']['Time [Sec]']
+        data_rb85 = ratios['Rb85'].iloc[:, 1:]
+        data_sr105 = ratios['Sr105'].iloc[:, 1:]
+        data_sr106 = ratios['Sr106'].iloc[:, 1:]
+        rb_sr = time
+        sr_sr = time
+        rbsr_r = time
+        srsr_r = time
+        rbsr_dfi = []
+        srsr_dfi = []
+        for i, spot in enumerate(data_rb85.columns.to_list()):
+            data_rb85_i = data_rb85.loc[:, spot].dropna()
+            data_sr105_i = data_sr105.iloc[:, i].dropna()
+            data_sr106_i = data_sr106.iloc[:, i].dropna()
+            # data_i.mask(data_i < 0, np.nan, inplace=True)
+            # ratios
+            rbsr_i = data_rb85_i / data_sr105_i
+            srsr_i = data_sr106_i / data_sr105_i
+            rbsr_r = pd.concat([rbsr_r, rbsr_i.rename('Rb/Sr-' + str(i+1))], axis=1)
+            srsr_r = pd.concat([srsr_r, srsr_i.rename('Sr/Sr-' + str(i+1))], axis=1)
+            # df pattern
+            rbsr_mean = rbsr_i.mean()
+            rbsr_df = rbsr_i / rbsr_mean
+            srsr_mean = srsr_i.mean()
+            srsr_df = srsr_i / srsr_mean
+            rb_sr = pd.concat([rb_sr, rbsr_df.rename('Rb/Sr-' + str(i+1))], axis=1)
+            sr_sr = pd.concat([sr_sr, srsr_df.rename('Sr/Sr-' + str(i+1))], axis=1)
+            # df index
+            mid = len(rbsr_i) // 2
+            rbsr_h1 = rbsr_i.iloc[:mid].mean()
+            rbsr_h2 = rbsr_i.iloc[mid:].mean()
+            rbsr_dfi.append(((rbsr_h2 - rbsr_h1) / rbsr_mean) * 100)
+            srsr_h1 = srsr_i.iloc[:mid].mean()
+            srsr_h2 = srsr_i.iloc[mid:].mean()
+            srsr_dfi.append(((srsr_h2 - srsr_h1) / srsr_mean) * 100)
+            # saving
+        df_data[name] = {'Rb/Sr': rb_sr, 'Sr/Sr': sr_sr}
+        df_index_data[name] = {'Rb/Sr': statistics.mean(rbsr_dfi), 'Rb/Sr sd': statistics.stdev(rbsr_dfi),
+                               'Sr/Sr': statistics.mean(srsr_dfi), 'Sr/Sr sd': statistics.stdev(srsr_dfi)}
+        ratios_data[name] = {'Rb/Sr': rbsr_r, 'Sr/Sr': srsr_r}
+    return df_data, df_index_data, ratios_data
+
+def df_patterns_calc_selected_data(data):
+    df_data = {}
+    df_index_data = {}
+    for name, ratios in data.items():
+        time = ratios['Rb/Sr']['Elapsed Time']
+        data_rbsr = ratios['Rb/Sr'].iloc[:, 1:]
+        data_srsr = ratios['Sr/Sr'].iloc[:, 1:]
+        rb_sr = time
+        sr_sr = time
+        rbsr_dfi = []
+        srsr_dfi = []
+        for i, spot in enumerate(data_rbsr.columns.to_list()):
+            rbsr_i = data_rbsr.loc[:, spot].dropna()
+            srsr_i = data_srsr.iloc[:, i].dropna()
+            # data_i.mask(data_i < 0, np.nan, inplace=True)
+            # df pattern
+            rbsr_mean = rbsr_i.mean()
+            rbsr_df = rbsr_i / rbsr_mean
+            srsr_mean = srsr_i.mean()
+            srsr_df = srsr_i / srsr_mean
+            rb_sr = pd.concat([rb_sr, rbsr_df.rename('Rb/Sr-' + str(i + 1))], axis=1)
+            sr_sr = pd.concat([sr_sr, srsr_df.rename('Sr/Sr-' + str(i + 1))], axis=1)
+            # df index
+            mid = len(rbsr_i) // 2
+            rbsr_h1 = rbsr_i.iloc[:mid].mean()
+            rbsr_h2 = rbsr_i.iloc[mid:].mean()
+            rbsr_dfi.append(((rbsr_h2 - rbsr_h1) / rbsr_mean) * 100)
+            srsr_h1 = srsr_i.iloc[:mid].mean()
+            srsr_h2 = srsr_i.iloc[mid:].mean()
+            srsr_dfi.append(((srsr_h2 - srsr_h1) / srsr_mean) * 100)
+            # saving
+        df_data[name] = {'Rb/Sr': rb_sr, 'Sr/Sr': sr_sr}
+        df_index_data[name] = {'Rb/Sr': statistics.mean(rbsr_dfi), 'Rb/Sr sd': statistics.stdev(rbsr_dfi),
+                               'Sr/Sr': statistics.mean(srsr_dfi), 'Sr/Sr sd': statistics.stdev(srsr_dfi)}
+    return df_data, df_index_data
+
+def plot_df_all_data():
+    # settings
+    colours = ['#000000', '#9E9B99', '#66CCEE', '#FFC20A', '#0C7BDC', '#E66100', '#5D3A9B', '#D41159', '#D35FB7',
+               '#1AFF1A']
+    RM = ['LaPosta_V', 'LaPosta_H', 'MD4B_V', 'MD4B_H', 'HogsboM_V', 'HogsboM_H', 'BRM1_V', 'BRM1_H', 'BRM2_V',
+          'BRM2_H']
+    limit = {'LaPosta_V': [.0, 2.5], 'LaPosta_H': [.0, 2.5],
+             'MD4B_V': [.0, 2.5], 'MD4B_H': [.0, 2.5],
+             'HogsboM_V': [0, 4], 'HogsboM_H': [0, 4],
+             'BRM1_V': [.0, 2.5], 'BRM1_H': [.0, 2.5],
+             'BRM2_V': [.0, 2.5], 'BRM2_H': [.0, 2.5]}
+    # get data file paths
+    dir_path = r'selected_signal_crystallographic_comparison'
+    file_pathern = os.path.join(dir_path, '*.xlsx')
+    data_files = glob.glob(file_pathern)
+    # all_data = {name: [] for name in RM}
+    # data_each_run = {name: {} for name in RM}
+    # open and plot data
+    fig, axes = plt.subplots(nrows=5, ncols=2, layout='constrained')
+    axes = axes.flatten()
+    ratio = 'Rb/Sr'
+    df_index = {}
+    ratios = {}
+    for i, file in enumerate(data_files):
+        file_name = os.path.splitext(os.path.basename(file))[0]
+        print(file_name)
+        raw_data = open_ungrouped_raw_data(file)
+        # df_data, df_index_data = df_patterns_calc_selected_data(raw_data)
+        # df_data, df_index_data, ratios_data = df_patterns_calc(raw_data)
+        # for name, ratios in df_data.items():
+        #     row = RM.index(name)
+        #     data = ratios[ratio]
+        #     time = data.iloc[:, 0]
+        #     # plot all data
+        #     axes[row].plot(time, data.iloc[:, 1:], color=colours[i])
+        #     # plot data mean
+        #     # data_mean = data.iloc[:, 1:].mean(axis=1)
+        #     # axes[row].plot(time, data_mean, label=name, color=colours[i])
+        #     axes[row].set_title(name)
+        #     axes[row].set_ylim(limit[name][0], limit[name][1])
+        #     if row == 8 or row == 9:
+        #         axes[row].set_xlabel('Ablation time (s)')
+        #     if row % 2 == 0:
+        #         axes[row].set_ylabel('Norm ' + ratio)
+            # get data for interpolation
+            # run_data_and_mean = pd.concat([data, data_mean.mean(axis=1).rename('mean')], axis=1)
+            # material = data_each_run[name + '-' + file_name]
+            # material[file_name] = run_data_and_mean
+            # list = all_data[name + '-' + file_name]
+            # list.append(pd.DataFrame(data=data_mean.values, index=time.values))
+        # df_index[file_name] = df_index_data
+        # ratios[file_name] = ratios_data
+        ratios[file_name] = raw_data
+    # from statsmodels.nonparametric.smoothers_lowess import lowess
+    # all_data_mean = {}
+    # for name, list in all_data.items():
+    #     try:
+    #         all_times = [df.index.to_numpy() for df in list]
+    #         all_times = np.unique(np.concatenate(all_times))
+    #         common_times = np.linspace(all_times.min(), all_times.max(), 200)
+    #
+    #         interpolated_dfs = []
+    #         for df in list:
+    #             # Ensure sorted index and numeric
+    #             df = df.sort_index()
+    #             df.index = df.index.astype(float)
+    #
+    #             # Interpolate to make time a continuous function
+    #             df_interp = df.interpolate(method='index', limit_direction='both')
+    #
+    #             # Now use numpy.interp for each column to ensure smooth interpolation
+    #             df_uniform = pd.DataFrame(index=common_times)
+    #
+    #             for col in df.columns:
+    #                 # Drop NaNs to avoid crashing interp
+    #                 valid = df_interp[col].dropna()
+    #                 if len(valid) < 2:
+    #                     # Not enough points to interpolate — skip or fill
+    #                     df_uniform[col] = np.nan
+    #                 else:
+    #                     df_uniform[col] = np.interp(common_times, valid.index, valid.values)
+    #
+    #             interpolated_dfs.append(df_uniform)
+    #
+    #         # Combine and average (ignoring NaNs)
+    #         combined = pd.concat(interpolated_dfs)
+    #         mean_df = combined.groupby(combined.index).mean()
+    #         all_data_mean[name] = mean_df
+    #         std_df = combined.groupby(combined.index).std()
+    #         n = combined.groupby(combined.index).count()
+    #         x = mean_df.index.to_numpy()
+    #         y = mean_df.iloc[:, 0].to_numpy()
+    #         lowess_r = np.array(lowess(endog=y, exog=x, frac=0.15, return_sorted=False))
+    #         stderr = (std_df.iloc[:, 0] / np.sqrt(n.iloc[:, 0])).to_numpy()
+    #         upper = lowess_r + 1.96 * stderr
+    #         lower = lowess_r - 1.96 * stderr
+    #
+    #         axes[RM.index(name)].plot(x, lowess_r, 'black', label=name+'_LOWESS')
+    #         axes[RM.index(name)].fill_between(x, lower, upper, color='black', alpha=0.1, label='95% Envelope')
+    #     except ValueError:
+    #         pass
+    # plt.show()
+    # row = []
+    # for session, materials in df_index.items():
+    #     for material, ratios in materials.items():
+    #         row.append({'Session': session, 'Material': material, 'Rb/Sr': ratios['Rb/Sr'],
+    #                     'Rb/Sr sd': ratios['Rb/Sr sd'], 'Sr/Sr': ratios['Sr/Sr'], 'Sr/Sr sd': ratios['Sr/Sr sd']})
+    # with pd.ExcelWriter('df_index_all_data.xlsx') as writer:
+    #     pd.DataFrame(row).to_excel(writer)
+    # plot_ratios_all_data(ratios)
+    plot_ratios_all_data(ratios)
+
+def plot_ratios_all_data(data):
+    cb_palette = [
+        '#000000', '#9E9B99', '#66CCEE', '#FFC20A', '#0C7BDC',
+        '#E66100', '#5D3A9B', '#D41159', '#D35FB7', '#1AFF1A'
+    ]
+    # Define base materials (without _V / _H)
+    base_materials = ['LaPosta', 'MD4B', 'HogsboM', 'BRM1', 'BRM2']
+    versions = ['_V', '_H']
+    ratio_types = ['Rb/Sr', 'Sr/Sr']
+    marker_map = {'_V': 'o', '_H': 's'}
+
+    def _mean_sem(df):
+        vals = df.dropna().values
+        mean = vals.mean()
+        sd = vals.std(ddof=1) # / np.sqrt(len(vals)) if len(vals) > 1 else 0
+        return mean, sd
+
+    sessions = list(data.keys())  # preserve user's ordering
+    n_sessions = len(sessions)
+    n_rows = len(base_materials)
+    n_cols = len(ratio_types)
+
+    fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols, sharex=False)
+
+    # Ensure axes is 2D array even if n_rows or n_cols == 1
+    axes = np.atleast_2d(axes)
+
+    # x positions for sessions (base)
+    x_base = np.arange(n_sessions) * 1.0
+
+    col_jitter_step = .1
+    version_offset = .18
+
+    for i_base, base in enumerate(base_materials):
+        for j_ratio, ratio in enumerate(ratio_types):
+            ax = axes[i_base, j_ratio]
+            # For legend handles later, we'll collect nothing here; create legends after plotting
+            for s_idx, session in enumerate(sessions):
+                color = cb_palette[s_idx % len(cb_palette)]
+
+                for ver in versions:
+                    mat_name = base + ver
+                    # defensive: skip if missing
+                    if session not in data or mat_name not in data[session] or ratio not in data[session][mat_name]:
+                        continue
+                    df = data[session][mat_name][ratio]
+
+                    # require pandas; assume df has at least 2 columns (time + >=1 ratio col)
+                    # select ratio columns (exclude first/time column)
+                    try:
+                        ratio_cols = df.iloc[:, 1:]
+                    except Exception:
+                        continue
+
+                    if ratio_cols.shape[1] == 0:
+                        continue
+
+                    n_ratio_cols = ratio_cols.shape[1]
+                    # center jitter for columns so that multiple points per session are visible
+                    # e.g., if 3 cols -> offsets [-j,0,+j], if 4 cols -> [-1.5j, -0.5j, +0.5j, +1.5j], etc.
+                    max_spread = 0.25  # total horizontal spread allowed for all columns
+                    if n_ratio_cols == 1:
+                        col_jitters = np.array([0.0])
+                    else:
+                        # even spacing from -max_spread to +max_spread
+                        col_jitters = np.linspace(-max_spread, max_spread, n_ratio_cols)
+
+                    # version offset: _V left (-version_offset), _H right (+version_offset)
+                    v_off = -version_offset if ver == '_V' else version_offset
+
+                    for k, col_name in enumerate(ratio_cols.columns):
+                        series = ratio_cols.iloc[:, k]
+                        mean, sem = _mean_sem(series)
+
+                        if np.isnan(mean):
+                            continue
+
+                        x = x_base[s_idx] + v_off + col_jitters[k]
+
+                        ax.errorbar(
+                            x, mean, yerr=sem,
+                            fmt=marker_map[ver],
+                            color=color,
+                            markersize=5,
+                            capsize=2,
+                            linestyle='None',
+                            markeredgewidth=0.5,
+                            alpha=0.95
+                        )
+            # aesthetics
+            ax.set_ylabel(base, rotation=90, va='center')
+            if i_base == 0:
+                ax.set_title(ratio)
+            # keep ticks at session positions but hide labels
+            ax.set_xticks(x_base)
+            ax.set_xticklabels([''] * len(x_base))
+            # tighten y-limits a bit if there is data present
+            # grab y-data from plotted lines to compute limits safely
+            y_data = []
+            for line in ax.lines:
+                # line.get_xydata() will include errorbar cap lines etc; safer to skip
+                try:
+                    xy = line.get_xydata()
+                    if len(xy) > 0:
+                        y_data.extend(xy[:, 1].tolist())
+                except Exception:
+                    pass
+            if len(y_data) > 0:
+                ymin, ymax = np.nanmin(y_data), np.nanmax(y_data)
+                yrange = ymax - ymin if ymax != ymin else max(abs(ymax), 1.0)
+                ax.set_ylim(ymin - 0.12 * yrange, ymax + 0.12 * yrange)
+    plt.show()
+
+
+# /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 class Window(QDialog):
     def __init__(self):
@@ -539,11 +765,11 @@ class Window(QDialog):
             print('No data to export')
 
     def calc(self):
-        '''
+        """
         This function calculates the internal precision (2s%) and the internal reproducibility (RSD%) of the Rb/Rb and
         Sr/Sr ratios
         The loaded data file should be the Excel file exported from Iolite
-        '''
+        """
 
         if len(self.defined_groups.keys()) > 0:
             cols = self.raw_data.columns.to_list()
@@ -636,6 +862,5 @@ class Window(QDialog):
 #     window.show()
 #     sys.exit(app.exec_())
 
-plot_raw_data()
-
-
+# Call the method you want here:
+plot_df_all_data()

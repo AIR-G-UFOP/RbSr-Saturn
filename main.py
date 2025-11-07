@@ -79,19 +79,26 @@ class MainWindow(QMainWindow):
         self.ui.btn_run.clicked.connect(self.check_reduction_scheme)
         self.ui.checkBox_matrix.toggled.connect(self.check_drift_option)
 
-        self.setupSubWindows()
-        self.load_reference_material()
-
         # reference = {
-        #     'NIST610': {'Sr87/Sr86': 0.79699, 'Sr87/Sr86_unc': 0.000018, 'Rb87/Sr86': 2.33, 'Rb87/Sr86_unc': 0.00049,
-        #                 'Sr87/Sr86_i': '', 'Sr87/Sr86_i_unc': '', 'Age': '', 'Age_unc': ''},
-        #     'MICAMG': {'Sr87/Sr86': 1.8525, 'Sr87/Sr86_unc': 0.0024, 'Rb87/Sr86': 154.6, 'Rb87/Sr86_unc': 1.93,
-        #                'Sr87/Sr86_i': 0.72607, 'Sr87/Sr86_i_unc': 0.0007, 'Age': 519.4, 'Age_unc': 6.5}
+        #     'NIST SRM 610': {'Sr87/Sr86': 0.709699, 'Sr87/Sr86_unc': 0.000018, 'Rb87/Sr86': 2.389,
+        #                      'Rb87/Sr86_unc': 0.00049, 'Sr87/Sr86_i': '', 'Sr87/Sr86_i_unc': '', 'Age': '',
+        #                      'Age_unc': ''},
+        #     'Mica-Mg': {'Sr87/Sr86': 1.8525, 'Sr87/Sr86_unc': 0.0024, 'Rb87/Sr86': 154.6, 'Rb87/Sr86_unc': 1.93,
+        #                 'Sr87/Sr86_i': 0.72607, 'Sr87/Sr86_i_unc': 0.0007, 'Age': 519.7, 'Age_unc': 6.5},
+        #     'Mica-Fe': {'Sr87/Sr86': 7.65, 'Sr87/Sr86_unc': 0.2, 'Rb87/Sr86': 1633.5, 'Rb87/Sr86_unc': 82.5,
+        #                 'Sr87/Sr86_i': 0.72607, 'Sr87/Sr86_i_unc': 0.0007, 'Age': 307.6, 'Age_unc': 0.4},
+        #     'La Posta': {'Sr87/Sr86': 1.786, 'Sr87/Sr86_unc': 0.092, 'Rb87/Sr86': 859.4, 'Rb87/Sr86_unc': 46.9,
+        #                  'Sr87/Sr86_i': 0.7049, 'Sr87/Sr86_i_unc': 0.0005, 'Age': 91.6, 'Age_unc': 1.2},
+        #     'MD4B': {'Sr87/Sr86': 0.844, 'Sr87/Sr86_unc': 0.012, 'Rb87/Sr86': 100.3, 'Rb87/Sr86_unc': 2.7,
+        #              'Sr87/Sr86_i': 0.70446, 'Sr87/Sr86_i_unc': 0.00007, 'Age': 99.12, 'Age_unc': 0.14}
         # }
         #
         # file = open('database.db', 'wb')
         # pickle.dump(reference, file)
         # file.close()
+
+        self.setupSubWindows()
+        self.load_reference_material()
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.MouseButtonRelease:
@@ -235,17 +242,18 @@ class MainWindow(QMainWindow):
 
     def open_signalDialog(self):
         self.overlay.show()
-        self.signalDialog = SignalDialog(self, self.handlefiles.alldatafiles, self.DRS.line_index,
+        self.signalDialog = SignalDialog(self, self.handlefiles.alldatafiles, self.DRS.line_index, self.DRS.crop_time,
                                          self.handlefiles.all_run_names, self.handlefiles.data_head, self.DRS.limits,
                                          self.handlelog.name_links, self.handlelog.names_log)
         self.signalDialog.signal_return.connect(self.return_signalDialog)
         self.signalDialog.setWindowModality(Qt.WindowModal)
         self.signalDialog.exec_()
 
-    @pyqtSlot(bool, dict)
-    def return_signalDialog(self, opt, new_limits):
+    @pyqtSlot(bool, dict, dict)
+    def return_signalDialog(self, opt, new_limits, new_crop):
         self.overlay.hide()
         self.DRS.limits = new_limits
+        self.DRS.crop_time = new_crop
         self.signal = opt
         if opt:
             if self.create_popup('Run Scheme?',
@@ -336,8 +344,11 @@ class MainWindow(QMainWindow):
     def export_data(self, opts):
         if opts['Results']:
             if isinstance(self.DRS.results, pd.DataFrame):
-                with pd.ExcelWriter('results.xlsx') as writer:
-                    self.DRS.results.to_excel(writer, sheet_name='Data', index=True)
+                try:
+                    with pd.ExcelWriter('results.xlsx') as writer:
+                        self.DRS.results.to_excel(writer, sheet_name='Data', index=True)
+                except PermissionError:
+                    self.print_message('Export failed. File might be opened.')
             else:
                 self.print_message('No results to export.')
         if opts['Time Series']:
@@ -429,10 +440,12 @@ class MainWindow(QMainWindow):
                 self.ui.listWidget_names.addItem(item)
 
     def populate_list_masses(self):
-        masses = (self.handlefiles.data_head[1:] +
-                  ['Rb87', 'Rb85/Sr86_raw', 'Sr87/Sr86_raw', 'Rb87/Sr86_raw', 'Sr87/Rb87_raw', 'Sr88/Sr86_raw',
-                   'Rb87/Sr87_raw', 'Rb87/Sr86_DF', 'Rb87/Sr86_mb', 'Sr87/Sr86_mb', 'Rb87/Sr86_drift', 'Sr87/Sr86_drift'
-                   ])
+        masses = (self.handlefiles.data_head[1:])
+        if self.DRS.intermediate_data:
+            interm_masses = next(iter(self.DRS.intermediate_data.values())).columns.to_list()
+            for mass in interm_masses:
+                if mass not in masses and mass != 'Time [Sec]':
+                    masses.append(mass)
         self.ui.listWidget_masses.blockSignals(True)
         current_masses = []
         for i in range(self.ui.listWidget_masses.count()):
@@ -629,8 +642,12 @@ class MainWindow(QMainWindow):
             previousselected = get_unique_name(self.handlelog.name_links, self.previous_runselected)
             legend = self.ui.graphicsView.addLegend(offset=(-1, 1), labelTextColor='k')
             for i, run in enumerate(selected):
-                data = pd.concat([self.DRS.background_data_raw[run], self.DRS.intermediate_data[run]], axis=0)
+                # data = pd.concat([self.DRS.background_data_raw[run], self.DRS.intermediate_data[run]], axis=0)
                 for mass in self.mselected:
+                    if mass in self.handlefiles.alldatafiles[run].columns.to_list():
+                        data = self.handlefiles.alldatafiles[run]
+                    elif mass in self.DRS.intermediate_data[run].columns.to_list():
+                        data = self.DRS.intermediate_data[run]
                     xdata = data.iloc[:, 0].to_list()
                     ydata = data.loc[:, mass].to_list()
                     if run in self.plotted.keys():
@@ -763,8 +780,10 @@ class MainWindow(QMainWindow):
         else:
             self.print_message('ERROR! RM for matrix correction should be in the database and in groups')
         self.DRS.compute_results(self.groups, self.handlelog.name_links)
-        self.print_message('All selected data corrected!')
+        self.populate_list_masses()
         self.populate_table()
+        self.print_message('All selected data corrected!')
+
 
 
 if __name__ == "__main__":

@@ -8,9 +8,9 @@ from module.utils import get_unique_name, get_log_name
 
 
 class SignalDialog(QDialog):
-    signal_return = pyqtSignal(bool, dict)
+    signal_return = pyqtSignal(bool, dict, dict)
 
-    def __init__(self, parent, raw, index, all_points, channels, limits, link, log):
+    def __init__(self, parent, raw, index, crop, all_points, channels, limits, link, log):
         super(SignalDialog, self).__init__(parent)
 
         self.ui = Ui_Signal()
@@ -24,6 +24,8 @@ class SignalDialog(QDialog):
         self.ui.graphicsView.showGrid(x=True, y=True)
         self.raw_data = raw
         self.index = index
+        self.crop = crop
+        self.initial_crop = crop
         self.all_points = all_points
         self.channels = channels
         self.limits = limits
@@ -43,6 +45,10 @@ class SignalDialog(QDialog):
         self.ui.listWidget_channels.viewport().installEventFilter(self)
         self.ui.btn_cancel.clicked.connect(self.btn_clicked)
         self.ui.btn_ok.clicked.connect(self.btn_clicked)
+        self.ui.bkgStartCrop.valueChanged.connect(self.get_limits_from_crops)
+        self.ui.bkgEndCrop.valueChanged.connect(self.get_limits_from_crops)
+        self.ui.sigStartCrop.valueChanged.connect(self.get_limits_from_crops)
+        self.ui.sigEndCrop.valueChanged.connect(self.get_limits_from_crops)
 
         self.plot = self.ui.graphicsView.getPlotItem()
         self.plot.setLabel('bottom', 'Time (sec)')
@@ -51,6 +57,7 @@ class SignalDialog(QDialog):
         self.create_regions_of_interest()
         self.fill_combo()
         self.fill_list()
+        self.setup_spinBoxes()
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.MouseButtonRelease:
@@ -79,16 +86,16 @@ class SignalDialog(QDialog):
 
     def closeEvent(self, event):
         if self.sender().objectName() != 'btn_cancel' and self.sender().objectName() != 'btn_ok':
-            self.signal_return.emit(False, self.initial_limits)
+            self.signal_return.emit(False, self.initial_limits, self.initial_crop)
             self.close()
 
     def btn_clicked(self):
         btn = self.sender().objectName()
         self.close()
         if btn == 'btn_cancel':
-            self.signal_return.emit(False, self.initial_limits)
+            self.signal_return.emit(False, self.initial_limits, self.initial_crop)
         else:
-            self.signal_return.emit(True, self.limits)
+            self.signal_return.emit(True, self.limits, self.crop)
 
     def fill_combo(self):
         if self.all_points:
@@ -100,6 +107,15 @@ class SignalDialog(QDialog):
             self.ui.listWidget_channels.addItems(self.channels[1:])
             self.ui.listWidget_channels.setCurrentRow(0)
             self.select_channels(self.ui.listWidget_channels.selectedItems())
+
+    def setup_spinBoxes(self):
+        self._set_spinBoxes_signal(True)
+        name = get_unique_name(self.name_links, [self.spot_name])[0]
+        self.ui.bkgStartCrop.setValue(self.crop[name][0])
+        self.ui.bkgEndCrop.setValue(self.crop[name][1])
+        self.ui.sigStartCrop.setValue(self.crop[name][2])
+        self.ui.sigEndCrop.setValue(self.crop[name][3])
+        self._set_spinBoxes_signal(False)
 
     def select_channels(self, items):
         self.channel_selected = [item.text() for item in items]
@@ -125,6 +141,7 @@ class SignalDialog(QDialog):
             if self.sender() == self.ui.comboBox_spot and spot_name != self.spot_name:
                 self.spot_name = spot_name
                 self._update_regions_of_interest()
+                self.setup_spinBoxes()
 
     def _get_data(self, channel, label):
         data = self.raw_data[label]
@@ -256,6 +273,12 @@ class SignalDialog(QDialog):
         self.region_sig.blockSignals(block)
         self.region_bkg.blockSignals(block)
 
+    def _set_spinBoxes_signal(self, block):
+        self.ui.bkgStartCrop.blockSignals(block)
+        self.ui.bkgEndCrop.blockSignals(block)
+        self.ui.sigStartCrop.blockSignals(block)
+        self.ui.sigEndCrop.blockSignals(block)
+
     def _get_regions_of_interest_limits(self):
         min_sig, max_sig = self.region_sig.getRegion()
         min_bkg, max_bkg = self.region_bkg.getRegion()
@@ -278,6 +301,55 @@ class SignalDialog(QDialog):
         else:
             self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]
         self._get_limits_from_data()
+
+    def get_limits_from_crops(self):
+        bkg_start_crop = self.ui.bkgStartCrop.value()
+        bkg_end_crop = self.ui.bkgEndCrop.value()
+        sig_start_crop = self.ui.sigStartCrop.value()
+        sig_end_crop = self.ui.sigEndCrop.value()
+
+        if self.ui.checkBox_applyToAll.isChecked():
+            names = self.all_points
+        else:
+            names = get_unique_name(self.name_links, [self.spot_name])
+
+        for name in names:
+            t_values = self.raw_data[name].iloc[:, 0].values
+            previous_limits = self.limits[name]
+            previous_crop = self.crop[name]
+            if bkg_start_crop != previous_crop[0]:
+                start_bkg = t_values[0] + bkg_start_crop
+                min_bkg = t_values[np.abs(t_values - start_bkg).argmin()]
+            else:
+                min_bkg = previous_limits[0]
+                bkg_start_crop = self.crop[name][0]
+            if bkg_end_crop != previous_crop[1]:
+                end_bkg = t_values[self.index] - bkg_end_crop
+                max_bkg = t_values[np.abs(t_values - end_bkg).argmin()]
+            else:
+                max_bkg = previous_limits[1]
+                bkg_end_crop = self.crop[name][1]
+            if sig_start_crop != previous_crop[2]:
+                start_sig = t_values[self.index] + sig_start_crop
+                min_sig = t_values[np.abs(t_values - start_sig).argmin()]
+            else:
+                min_sig = previous_limits[2]
+                sig_start_crop = self.crop[name][2]
+            if sig_end_crop != previous_crop[3]:
+                end_sig = t_values[-1] - sig_end_crop
+                max_sig = t_values[np.abs(t_values - end_sig).argmin()]
+            else:
+                max_sig = previous_limits[3]
+                sig_end_crop = self.crop[name][3]
+
+            self.limits[name] = [min_bkg, max_bkg, min_sig, max_sig]
+            self.crop[name] = [bkg_start_crop, bkg_end_crop, sig_start_crop, sig_end_crop]
+
+        current_spot = get_unique_name(self.name_links, [self.spot_name])[0]
+        self._set_regions_of_interest_signal(True)
+        self.region_bkg.setRegion([self.limits[current_spot][0], self.limits[current_spot][1]])
+        self.region_sig.setRegion([self.limits[current_spot][2], self.limits[current_spot][3]])
+        self._set_regions_of_interest_signal(False)
 
     def _get_limits_from_data(self):
         if self.ui.checkBox_applyToAll.isChecked():
