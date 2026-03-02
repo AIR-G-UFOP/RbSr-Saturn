@@ -15,7 +15,7 @@ from scipy import stats
 from scipy.ndimage import gaussian_filter1d
 from collections import defaultdict
 import glob
-from scipy.optimize import curve_fit, leastsq
+from scipy.optimize import curve_fit, leastsq, root_scalar
 from scipy.interpolate import UnivariateSpline, interp1d, make_smoothing_spline
 
 from PyQt5 import QtCore, QtGui, QtWidgets

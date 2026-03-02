@@ -23,6 +23,9 @@ class DRS:
         self.convertion_rate_data = None  # mean convertion rate of all files imported
         self.DF_data = None  # downhole fractionation of all files
         self.background_uncertainty = {}
+        self.ratios_uncertainty = {}
+        self.excess_variance_drift = {}
+        self.excess_variance_matrix = {}
         self.results = None
 
     def get_limits(self, dict_initial, mass_index):
@@ -370,6 +373,62 @@ class DRS:
                 data['Rb87/Sr86_matrix'] = ratio / rb_fc
                 self.intermediate_data[name] = data
 
+    @staticmethod
+    def _mswd_with_excess(e2, n, x, sd):
+        """
+        iterative function that calculates the MSWD varying the excess variance until it converges or not
+        e2: excess variance, float
+        n: number of points, int
+        x: ratio, list
+        sd: standard deviation, list
+        """
+        total_var = np.array(sd)**2 + e2
+        w_total = 1 / total_var
+        x_bar_total = np.sum(w_total * np.array(x)) / np.sum(w_total)
+        mswd_total = np.sum(w_total * (np.array(x) - x_bar_total)**2) / (n - 1)
+        return mswd_total - 1.0
+
+    def compute_excess_scatter(self, groups, rm, mode):
+        selections = groups[rm]
+        if mode == 'drift':
+            ratios = ['Rb87/Sr86_drift', 'Sr87/Sr86_drift']
+        else:
+            ratios = ['Rb87/Sr86_matrix', 'Sr87/Sr86_matrix']
+        n = len(selections)
+        for ratio in ratios:
+            x = []
+            sd = []
+            w = []
+            for selection in selections:
+                data_i = self.intermediate_data[selection]
+                x_i = data_i.loc[:, ratio].mean()    # mean ratios
+                sd_i = data_i.loc[:, ratio].std()    # standard deviation ratios
+                w_i = 1 / sd_i**2   # weight ratios
+                x.append(x_i)
+                sd.append(sd_i)
+                w.append(w_i)
+            x_bar = np.sum(np.array(w) * np.array(x)) / np.sum(np.array(w)) # weighted mean ratios
+            mswd = np.sum(np.array(w) * (np.array(x) - x_bar)**2) / (n - 1)
+            if mswd > 1:
+                try:
+                    """
+                    root_scalar finds the value of e2 (excess^2) that makes _mswd_with_excess = 0
+                    """
+                    root_result = root_scalar(lambda e2: self._mswd_with_excess(e2, n, x, sd),
+                                              bracket=[0, (np.max(x) - np.min(x))**2])
+                    excess_sqr = root_result.root if root_result.converged else 0
+                except ValueError:
+                    excess_sqr = 0   # excess scatter
+            else:
+                excess_sqr = 0
+            if mode == 'drift':
+                self.excess_variance_drift[ratio.split('_')[0]] = np.sqrt(excess_sqr)
+            else:
+                self.excess_variance_matrix[ratio.split('_')[0]] = np.sqrt(excess_sqr)
+
+    def propagate_internal_uncertainties(self, groups, link):
+        pass
+
     def compute_results(self, groups, link):
         mean = {}
         se = {}
@@ -407,3 +466,43 @@ class DRS:
         results = pd.concat([r_mean, r_se, r_std, r_rho], axis=1)
         self.results = results[['Rb87/Sr86', 'Rb87/Sr86 2SE', 'Rb87/Sr86 2SD', 'Sr87/Sr86', 'Sr87/Sr86 2SE', 'Sr87/Sr86 2SD', 'Rho']]
         self.results = remap_dataframe(self.results, link)
+
+    def calculate_ratio_statistics(self, groups, link):
+        mean = {}
+        se = {}
+        std = {}
+        s = {}
+        ratios = ["Rb85/Sr86_raw", "Rb87/Sr86_raw", "Sr87/Sr86_raw", "Rb87/Sr86_DFcorr", "Rb87/Sr86_mb",
+                  "Sr87/Sr86_mb", "Rb87/Sr86_drift", "Sr87/Sr86_drift", "Rb87/Sr86_matrix"]
+        for group, names in groups.items():
+            for name in names:
+                data = self.intermediate_data[name]
+                data = data.loc[:, ratios]
+                data_mean = data.mean().rename({ratio: ratio + '_mean' for ratio in ratios})
+                data_std = data.std().rename({ratio: ratio + '_std' for ratio in ratios})
+                data_se = data.sem().rename({ratio: ratio + '_se' for ratio in ratios})
+                data_s = pd.Series(2 * (data_se.values / data_mean.values) * 100,
+                                   index=[ratio + '_2s%' for ratio in ratios])
+                mean[name] = data_mean
+                std[name] = data_std
+                se[name] = data_se
+                s[name] = data_s
+        mean_df = pd.DataFrame(mean).T
+        std_df = pd.DataFrame(std).T
+        se_df = pd.DataFrame(se).T
+        s_df = pd.DataFrame(s).T
+        ratios_export = ["Rb85/Sr86_raw_mean", "Rb85/Sr86_raw_std", "Rb85/Sr86_raw_se", "Rb85/Sr86_raw_2s%",
+                         "Rb87/Sr86_raw_mean", "Rb87/Sr86_raw_std", "Rb87/Sr86_raw_se", "Rb87/Sr86_raw_2s%",
+                         "Sr87/Sr86_raw_mean", "Sr87/Sr86_raw_std", "Sr87/Sr86_raw_se", "Sr87/Sr86_raw_2s%",
+                         "Rb87/Sr86_DFcorr_mean", "Rb87/Sr86_DFcorr_std", "Rb87/Sr86_DFcorr_se", "Rb87/Sr86_DFcorr_2s%",
+                         "Rb87/Sr86_mb_mean", "Rb87/Sr86_mb_std", "Rb87/Sr86_mb_se", "Rb87/Sr86_mb_2s%",
+                         "Sr87/Sr86_mb_mean", "Sr87/Sr86_mb_std", "Sr87/Sr86_mb_se", "Sr87/Sr86_mb_2s%",
+                         "Rb87/Sr86_drift_mean", "Rb87/Sr86_drift_std", "Rb87/Sr86_drift_se", "Rb87/Sr86_drift_2s%",
+                         "Sr87/Sr86_drift_mean", "Sr87/Sr86_drift_std", "Sr87/Sr86_drift_se", "Sr87/Sr86_drift_2s%",
+                         "Rb87/Sr86_matrix_mean", "Rb87/Sr86_matrix_std", "Rb87/Sr86_matrix_se", "Rb87/Sr86_matrix_2s%"]
+        ratio_stats = pd.concat([mean_df, se_df, std_df, s_df], axis=1)[ratios_export]
+        ratios_uncertainty = remap_dataframe(ratio_stats, link)
+        with pd.ExcelWriter('stats_selected_ratios.xlsx') as writer:
+            ratios_uncertainty.to_excel(writer)
+        print("Ratio statistics saved to 'stats_selected_ratios.xlsx'")
+

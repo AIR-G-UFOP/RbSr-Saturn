@@ -743,6 +743,19 @@ QPushButton:pressed {
                </layout>
               </item>
               <item>
+               <widget class="QCheckBox" name="checkBox_uncertainty">
+                <property name="cursor">
+                 <cursorShape>PointingHandCursor</cursorShape>
+                </property>
+                <property name="text">
+                 <string>8) Propagate external uncertainties?</string>
+                </property>
+                <property name="checked">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item>
                <spacer name="verticalSpacer_2">
                 <property name="orientation">
                  <enum>Qt::Vertical</enum>

@@ -769,21 +769,23 @@ class MainWindow(QMainWindow):
                 drift = self.ui.checkBox_drift.isChecked()
                 if not drift:
                     return
+                # self.DRS.compute_excess_scatter(self.groups, rm1_name, 'drift')
             else:
                 self.print_message('ERROR! RM for drift correction should be in the database and in groups')
         if matrix:
             if rm2_name in self.groups.keys() and rm2_name in self.database.keys():
                 if drift:
                     self.DRS.matrix_correction(self.groups, rm2_name, self.database)
+                    # self.DRS.compute_excess_scatter(self.groups, rm2_name, 'matrix')
                 else:
                     self.print_message('ERROR! no external correction has been performed')
         else:
             self.print_message('ERROR! RM for matrix correction should be in the database and in groups')
         self.DRS.compute_results(self.groups, self.handlelog.name_links)
+        self.DRS.calculate_ratio_statistics(self.groups, self.handlelog.name_links)
         self.populate_list_masses()
         self.populate_table()
         self.print_message('All selected data corrected!')
-
 
 
 if __name__ == "__main__":
