@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file 'GroupDialog.ui'
+# Form implementation generated from reading ui file 'groupDialog.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.11
 #
@@ -15,7 +15,7 @@ class Ui_GroupDialog(object):
     def setupUi(self, GroupDialog):
         GroupDialog.setObjectName("GroupDialog")
         GroupDialog.setWindowModality(QtCore.Qt.WindowModal)
-        GroupDialog.resize(437, 343)
+        GroupDialog.resize(609, 343)
         self.verticalLayout = QtWidgets.QVBoxLayout(GroupDialog)
         self.verticalLayout.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout.setSpacing(0)
@@ -25,9 +25,9 @@ class Ui_GroupDialog(object):
         self.bgApp.setFrameShadow(QtWidgets.QFrame.Raised)
         self.bgApp.setObjectName("bgApp")
         self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.bgApp)
-        self.verticalLayout_2.setContentsMargins(2, 2, 2, 2)
-        self.verticalLayout_2.setSpacing(15)
         self.verticalLayout_2.setObjectName("verticalLayout_2")
+        self.horizontalLayout_4 = QtWidgets.QHBoxLayout()
+        self.horizontalLayout_4.setObjectName("horizontalLayout_4")
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
         self.listWidget = QtWidgets.QListWidget(self.bgApp)
@@ -90,7 +90,11 @@ class Ui_GroupDialog(object):
         self.btn_group.setObjectName("btn_group")
         self.verticalLayout_4.addWidget(self.btn_group)
         self.horizontalLayout.addWidget(self.frame)
-        self.verticalLayout_2.addLayout(self.horizontalLayout)
+        self.horizontalLayout_4.addLayout(self.horizontalLayout)
+        self.treeWidget = QtWidgets.QTreeWidget(self.bgApp)
+        self.treeWidget.setObjectName("treeWidget")
+        self.horizontalLayout_4.addWidget(self.treeWidget)
+        self.verticalLayout_2.addLayout(self.horizontalLayout_4)
         self.frame_2 = QtWidgets.QFrame(self.bgApp)
         self.frame_2.setMinimumSize(QtCore.QSize(0, 0))
         self.frame_2.setFrameShape(QtWidgets.QFrame.StyledPanel)
@@ -127,5 +131,6 @@ class Ui_GroupDialog(object):
         self.label.setText(_translate("GroupDialog", "Group name"))
         self.label_2.setText(_translate("GroupDialog", "Message:"))
         self.btn_group.setText(_translate("GroupDialog", "Create Group"))
+        self.treeWidget.headerItem().setText(0, _translate("GroupDialog", "Groups"))
         self.btn_cancel.setText(_translate("GroupDialog", "Cancel"))
         self.btn_ok.setText(_translate("GroupDialog", "Ok"))
